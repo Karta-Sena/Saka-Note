@@ -21,13 +21,13 @@ void UpdateMenuStrings()
     HMENU hFileMenu = GetSubMenu(hMenu, 0);
     if (hFileMenu)
     {
-        ModifyMenuW(hFileMenu, 0, MF_BYPOSITION | MF_STRING, IDM_FILE_NEW, lang.menuNew.c_str());
-        ModifyMenuW(hFileMenu, 1, MF_BYPOSITION | MF_STRING, IDM_FILE_OPEN, lang.menuOpen.c_str());
-        ModifyMenuW(hFileMenu, 2, MF_BYPOSITION | MF_STRING, IDM_FILE_SAVE, lang.menuSave.c_str());
-        ModifyMenuW(hFileMenu, 3, MF_BYPOSITION | MF_STRING, IDM_FILE_SAVEAS, lang.menuSaveAs.c_str());
-        ModifyMenuW(hFileMenu, 5, MF_BYPOSITION | MF_STRING, IDM_FILE_PRINT, lang.menuPrint.c_str());
-        ModifyMenuW(hFileMenu, 6, MF_BYPOSITION | MF_STRING, IDM_FILE_PAGESETUP, lang.menuPageSetup.c_str());
-        ModifyMenuW(hFileMenu, 8, MF_BYPOSITION | MF_STRING, IDM_FILE_EXIT, lang.menuExit.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_NEW, MF_BYCOMMAND | MF_STRING, IDM_FILE_NEW, lang.menuNew.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_OPEN, MF_BYCOMMAND | MF_STRING, IDM_FILE_OPEN, lang.menuOpen.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_SAVE, MF_BYCOMMAND | MF_STRING, IDM_FILE_SAVE, lang.menuSave.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_SAVEAS, MF_BYCOMMAND | MF_STRING, IDM_FILE_SAVEAS, lang.menuSaveAs.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_PRINT, MF_BYCOMMAND | MF_STRING, IDM_FILE_PRINT, lang.menuPrint.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_PAGESETUP, MF_BYCOMMAND | MF_STRING, IDM_FILE_PAGESETUP, lang.menuPageSetup.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_EXIT, MF_BYCOMMAND | MF_STRING, IDM_FILE_EXIT, lang.menuExit.c_str());
     }
 
     HMENU hEditMenu = GetSubMenu(hMenu, 1);

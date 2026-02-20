@@ -15,7 +15,9 @@ LangID LoadLanguageSetting()
         if (RegQueryValueExW(hKey, L"Language", nullptr, nullptr, reinterpret_cast<LPBYTE>(&value), &size) == ERROR_SUCCESS)
         {
             RegCloseKey(hKey);
-            return static_cast<LangID>(value);
+            if (value <= static_cast<DWORD>(LangID::JA))
+                return static_cast<LangID>(value);
+            return LangID::EN;
         }
         RegCloseKey(hKey);
     }
@@ -41,20 +43,19 @@ void InitLanguage()
 
 void SetLanguage(LangID lang)
 {
-    g_currentLang = lang;
-    SaveLanguageSetting();
-    
     switch (lang)
     {
     case LangID::JA:
+        g_currentLang = LangID::JA;
         g_currentStrings = &g_langJA;
         break;
     case LangID::EN:
     default:
+        g_currentLang = LangID::EN;
         g_currentStrings = &g_langEN;
         break;
     }
-    
+
     SaveLanguageSetting();
 }
 

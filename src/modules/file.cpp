@@ -1,13 +1,5 @@
 /*
-   ▄████████  ▄██████▄     ▄████████  ▄█        ▄██████▄   ▄██████▄     ▄███████▄
-  ███    ███ ███    ███   ███    ███ ███       ███    ███ ███    ███   ███    ███
-  ███    █▀  ███    ███   ███    ███ ███       ███    ███ ███    ███   ███    ███
- ▄███▄▄▄     ███    ███  ▄███▄▄▄▄██▀ ███       ███    ███ ███    ███   ███    ███
-▀▀███▀▀▀     ███    ███ ▀▀███▀▀▀▀▀   ███       ███    ███ ███    ███ ▀█████████▀
-  ███        ███    ███ ▀███████████ ███       ███    ███ ███    ███   ███
-  ███        ███    ███   ███    ███ ███▌    ▄ ███    ███ ███    ███   ███
-  ███         ▀██████▀    ███    ███ █████▄▄██  ▀██████▀   ▀██████▀   ▄████▀
-                          ███    ███ ▀
+  Saka Studio & Engineering
 
   File I/O operations with multi-encoding support (UTF-8, UTF-16, ANSI).
   Handles BOM detection, line ending conversion, and recent files tracking.
@@ -18,6 +10,7 @@
 #include "lang/lang.h"
 #include "editor.h"
 #include "ui.h"
+#include "settings.h"
 #include "resource.h"
 #include <shlwapi.h>
 #include <algorithm>
@@ -230,9 +223,20 @@ void LoadFile(const std::wstring &path)
         return;
     }
     DWORD size = GetFileSize(hFile, nullptr);
+    if (size == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
+    {
+        CloseHandle(hFile);
+        MessageBoxW(g_hwndMain, lang.msgCannotOpenFile.c_str(), lang.msgError.c_str(), MB_ICONERROR);
+        return;
+    }
     std::vector<BYTE> data(size);
     DWORD read = 0;
-    ReadFile(hFile, data.data(), size, &read, nullptr);
+    if (size > 0 && (!ReadFile(hFile, data.data(), size, &read, nullptr) || read != size))
+    {
+        CloseHandle(hFile);
+        MessageBoxW(g_hwndMain, lang.msgCannotOpenFile.c_str(), lang.msgError.c_str(), MB_ICONERROR);
+        return;
+    }
     CloseHandle(hFile);
     auto [enc, le] = DetectEncoding(data);
     std::wstring text = DecodeText(data, enc);
@@ -259,7 +263,13 @@ void SaveToPath(const std::wstring &path)
         return;
     }
     DWORD written = 0;
-    WriteFile(hFile, data.data(), static_cast<DWORD>(data.size()), &written, nullptr);
+    const DWORD bytesToWrite = static_cast<DWORD>(data.size());
+    if (bytesToWrite > 0 && (!WriteFile(hFile, data.data(), bytesToWrite, &written, nullptr) || written != bytesToWrite))
+    {
+        CloseHandle(hFile);
+        MessageBoxW(g_hwndMain, lang.msgCannotSaveFile.c_str(), lang.msgError.c_str(), MB_ICONERROR);
+        return;
+    }
     CloseHandle(hFile);
     g_state.filePath = path;
     g_state.modified = false;
@@ -276,12 +286,17 @@ void AddRecentFile(const std::wstring &path)
     while (g_state.recentFiles.size() > MAX_RECENT_FILES)
         g_state.recentFiles.pop_back();
     UpdateRecentFilesMenu();
+    SaveFontSettings();
 }
 
 void UpdateRecentFilesMenu()
 {
     HMENU hMenu = GetMenu(g_hwndMain);
+    if (!hMenu)
+        return;
     HMENU hFileMenu = GetSubMenu(hMenu, 0);
+    if (!hFileMenu)
+        return;
     static HMENU hRecentMenu = nullptr;
     if (hRecentMenu)
     {

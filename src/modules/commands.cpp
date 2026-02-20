@@ -1,13 +1,5 @@
 /*
-   ▄████████  ▄██████▄     ▄████████  ▄█        ▄██████▄   ▄██████▄     ▄███████▄
-  ███    ███ ███    ███   ███    ███ ███       ███    ███ ███    ███   ███    ███
-  ███    █▀  ███    ███   ███    ███ ███       ███    ███ ███    ███   ███    ███
- ▄███▄▄▄     ███    ███  ▄███▄▄▄▄██▀ ███       ███    ███ ███    ███   ███    ███
-▀▀███▀▀▀     ███    ███ ▀▀███▀▀▀▀▀   ███       ███    ███ ███    ███ ▀█████████▀
-  ███        ███    ███ ▀███████████ ███       ███    ███ ███    ███   ███
-  ███        ███    ███   ███    ███ ███▌    ▄ ███    ███ ███    ███   ███
-  ███         ▀██████▀    ███    ███ █████▄▄██  ▀██████▀   ▀██████▀   ▄████▀
-                          ███    ███ ▀
+  Saka Studio & Engineering
 
   Menu command handlers for File, Edit, Format, and View menu operations.
   Bridges user actions to core functionality modules.
@@ -22,6 +14,7 @@
 #include "resource.h"
 #include "lang/lang.h"
 #include <commdlg.h>
+#include <richedit.h>
 #include <shlwapi.h>
 #include <shellapi.h>
 #include <vector>
@@ -47,7 +40,7 @@ bool ConfirmDiscard()
     if (result == IDYES)
     {
         FileSave();
-        return true;
+        return !g_state.modified;
     }
     return result == IDNO;
 }
@@ -179,11 +172,22 @@ void FilePageSetup()
 }
 
 void EditUndo() { SendMessageW(g_hwndEditor, EM_UNDO, 0, 0); }
-void EditRedo() { SendMessageW(g_hwndEditor, EM_UNDO, 0, 0); }
+void EditRedo() { SendMessageW(g_hwndEditor, EM_REDO, 0, 0); }
 void EditCut() { SendMessageW(g_hwndEditor, WM_CUT, 0, 0); }
 void EditCopy() { SendMessageW(g_hwndEditor, WM_COPY, 0, 0); }
 void EditPaste() { SendMessageW(g_hwndEditor, WM_PASTE, 0, 0); }
-void EditDelete() { SendMessageW(g_hwndEditor, WM_CLEAR, 0, 0); }
+void EditDelete()
+{
+    DWORD start = 0, end = 0;
+    SendMessageW(g_hwndEditor, EM_GETSEL, reinterpret_cast<WPARAM>(&start), reinterpret_cast<LPARAM>(&end));
+    if (start != end)
+    {
+        SendMessageW(g_hwndEditor, WM_CLEAR, 0, 0);
+        return;
+    }
+    SendMessageW(g_hwndEditor, WM_KEYDOWN, VK_DELETE, 1);
+    SendMessageW(g_hwndEditor, WM_KEYUP, VK_DELETE, (1u << 30) | (1u << 31));
+}
 void EditSelectAll() { SendMessageW(g_hwndEditor, EM_SETSEL, 0, -1); }
 
 void EditTimeDate()
@@ -202,6 +206,7 @@ void FormatWordWrap()
     g_state.wordWrap = !g_state.wordWrap;
     CheckMenuItem(GetMenu(g_hwndMain), IDM_FORMAT_WORDWRAP, g_state.wordWrap ? MF_CHECKED : MF_UNCHECKED);
     ApplyWordWrap();
+    SaveFontSettings();
 }
 
 void ViewZoomIn()
@@ -214,6 +219,7 @@ void ViewZoomIn()
             g_state.zoomLevel = l;
             ApplyZoom();
             UpdateStatus();
+            SaveFontSettings();
             return;
         }
     }
@@ -229,6 +235,7 @@ void ViewZoomOut()
             g_state.zoomLevel = levels[i];
             ApplyZoom();
             UpdateStatus();
+            SaveFontSettings();
             return;
         }
     }
@@ -239,6 +246,7 @@ void ViewZoomDefault()
     g_state.zoomLevel = ZOOM_DEFAULT;
     ApplyZoom();
     UpdateStatus();
+    SaveFontSettings();
 }
 
 void ViewStatusBar()
@@ -247,6 +255,7 @@ void ViewStatusBar()
     CheckMenuItem(GetMenu(g_hwndMain), IDM_VIEW_STATUSBAR, g_state.showStatusBar ? MF_CHECKED : MF_UNCHECKED);
     ResizeControls();
     UpdateStatus();
+    SaveFontSettings();
 }
 
 void ViewChangeIcon()
@@ -271,6 +280,7 @@ void ViewChangeIcon()
             g_state.customIconPath = path;
             SendMessageW(g_hwndMain, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hNewIcon));
             SendMessageW(g_hwndMain, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hNewIcon));
+            SaveFontSettings();
         }
         else
             MessageBoxW(g_hwndMain, L"Failed to load icon file.", lang.appName.c_str(), MB_ICONERROR);
@@ -288,6 +298,7 @@ void ViewResetIcon()
     HICON hDefaultIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_NOTEPAD));
     SendMessageW(g_hwndMain, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hDefaultIcon));
     SendMessageW(g_hwndMain, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hDefaultIcon));
+    SaveFontSettings();
 }
 
 void HelpCheckUpdates()

@@ -1,13 +1,5 @@
 /*
-   ▄████████  ▄██████▄     ▄████████  ▄█        ▄██████▄   ▄██████▄     ▄███████▄
-  ███    ███ ███    ███   ███    ███ ███       ███    ███ ███    ███   ███    ███
-  ███    █▀  ███    ███   ███    ███ ███       ███    ███ ███    ███   ███    ███
- ▄███▄▄▄     ███    ███  ▄███▄▄▄▄██▀ ███       ███    ███ ███    ███   ███    ███
-▀▀███▀▀▀     ███    ███ ▀▀███▀▀▀▀▀   ███       ███    ███ ███    ███ ▀█████████▀
-  ███        ███    ███ ▀███████████ ███       ███    ███ ███    ███   ███
-  ███        ███    ███   ███    ███ ███▌    ▄ ███    ███ ███    ███   ███
-  ███         ▀██████▀    ███    ███ █████▄▄██  ▀██████▀   ▀██████▀   ▄████▀
-                          ███    ███ ▀
+  Saka Studio & Engineering
 
   Background image rendering with GDI+ support and multiple positioning modes.
   Supports tile, stretch, fit, fill, and nine anchor point positions.
@@ -17,6 +9,7 @@
 #include "core/globals.h"
 #include "theme.h"
 #include "resource.h"
+#include "settings.h"
 #include <commdlg.h>
 #include <algorithm>
 
@@ -35,6 +28,7 @@ void LoadBackgroundImage(const std::wstring &path)
     }
     g_state.background.imagePath = path;
     g_state.background.enabled = (g_bgImage != nullptr);
+    SaveFontSettings();
     InvalidateRect(g_hwndEditor, nullptr, TRUE);
 }
 
@@ -162,60 +156,83 @@ void SetBackgroundPosition(BgPosition pos)
 {
     g_state.background.position = pos;
     HMENU hMenu = GetMenu(g_hwndMain);
+    if (!hMenu)
+        return;
     HMENU hViewMenu = GetSubMenu(hMenu, 3);
-    HMENU hBgMenu = GetSubMenu(hViewMenu, 6);
+    if (!hViewMenu)
+        return;
+    HMENU hBgMenu = GetSubMenu(hViewMenu, 7);
+    if (!hBgMenu)
+        return;
     HMENU hPosMenu = GetSubMenu(hBgMenu, 4);
-    for (int i = 0; i < 13; ++i)
-        CheckMenuItem(hPosMenu, i, MF_BYPOSITION | MF_UNCHECKED);
-    int idx = 0;
+    if (!hPosMenu)
+        return;
+    const UINT commands[] = {
+        IDM_VIEW_BG_POS_TOPLEFT,
+        IDM_VIEW_BG_POS_TOPCENTER,
+        IDM_VIEW_BG_POS_TOPRIGHT,
+        IDM_VIEW_BG_POS_CENTERLEFT,
+        IDM_VIEW_BG_POS_CENTER,
+        IDM_VIEW_BG_POS_CENTERRIGHT,
+        IDM_VIEW_BG_POS_BOTTOMLEFT,
+        IDM_VIEW_BG_POS_BOTTOMCENTER,
+        IDM_VIEW_BG_POS_BOTTOMRIGHT,
+        IDM_VIEW_BG_POS_TILE,
+        IDM_VIEW_BG_POS_STRETCH,
+        IDM_VIEW_BG_POS_FIT,
+        IDM_VIEW_BG_POS_FILL};
+    for (UINT cmd : commands)
+        CheckMenuItem(hPosMenu, cmd, MF_BYCOMMAND | MF_UNCHECKED);
+    UINT targetCmd = IDM_VIEW_BG_POS_CENTER;
     switch (pos)
     {
     case BgPosition::TopLeft:
-        idx = 0;
+        targetCmd = IDM_VIEW_BG_POS_TOPLEFT;
         break;
     case BgPosition::TopCenter:
-        idx = 1;
+        targetCmd = IDM_VIEW_BG_POS_TOPCENTER;
         break;
     case BgPosition::TopRight:
-        idx = 2;
+        targetCmd = IDM_VIEW_BG_POS_TOPRIGHT;
         break;
     case BgPosition::CenterLeft:
-        idx = 4;
+        targetCmd = IDM_VIEW_BG_POS_CENTERLEFT;
         break;
     case BgPosition::Center:
-        idx = 5;
+        targetCmd = IDM_VIEW_BG_POS_CENTER;
         break;
     case BgPosition::CenterRight:
-        idx = 6;
+        targetCmd = IDM_VIEW_BG_POS_CENTERRIGHT;
         break;
     case BgPosition::BottomLeft:
-        idx = 8;
+        targetCmd = IDM_VIEW_BG_POS_BOTTOMLEFT;
         break;
     case BgPosition::BottomCenter:
-        idx = 9;
+        targetCmd = IDM_VIEW_BG_POS_BOTTOMCENTER;
         break;
     case BgPosition::BottomRight:
-        idx = 10;
+        targetCmd = IDM_VIEW_BG_POS_BOTTOMRIGHT;
         break;
     case BgPosition::Tile:
-        idx = 12;
+        targetCmd = IDM_VIEW_BG_POS_TILE;
         break;
     case BgPosition::Stretch:
-        idx = 13;
+        targetCmd = IDM_VIEW_BG_POS_STRETCH;
         break;
     case BgPosition::Fit:
-        idx = 14;
+        targetCmd = IDM_VIEW_BG_POS_FIT;
         break;
     case BgPosition::Fill:
-        idx = 15;
+        targetCmd = IDM_VIEW_BG_POS_FILL;
         break;
     }
-    CheckMenuItem(hPosMenu, idx, MF_BYPOSITION | MF_CHECKED);
+    CheckMenuItem(hPosMenu, targetCmd, MF_BYCOMMAND | MF_CHECKED);
     if (g_bgBitmap)
     {
         DeleteObject(g_bgBitmap);
         g_bgBitmap = nullptr;
     }
+    SaveFontSettings();
     InvalidateRect(g_hwndEditor, nullptr, TRUE);
 }
 
@@ -247,6 +264,7 @@ void ViewClearBackground()
     }
     g_state.background.enabled = false;
     g_state.background.imagePath.clear();
+    SaveFontSettings();
     InvalidateRect(g_hwndEditor, nullptr, TRUE);
 }
 
@@ -281,6 +299,7 @@ static INT_PTR CALLBACK OpacityDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARA
             val = (val < 0) ? 0 : (val > 100) ? 100
                                               : val;
             g_state.background.opacity = static_cast<BYTE>(val * 255 / 100);
+            SaveFontSettings();
             EndDialog(hDlg, IDOK);
             return TRUE;
         }
