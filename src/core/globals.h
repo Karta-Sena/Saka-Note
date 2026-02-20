@@ -21,6 +21,7 @@ extern HACCEL g_hAccel;
 extern AppState g_state;
 extern WNDPROC g_origEditorProc;
 extern WNDPROC g_origStatusProc;
+extern WNDPROC g_origTabsProc;
 extern ULONG_PTR g_gdiplusToken;
 extern Gdiplus::Image *g_bgImage;
 extern HBITMAP g_bgBitmap;

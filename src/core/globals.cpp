@@ -16,6 +16,7 @@ HACCEL g_hAccel = nullptr;
 AppState g_state;
 WNDPROC g_origEditorProc = nullptr;
 WNDPROC g_origStatusProc = nullptr;
+WNDPROC g_origTabsProc = nullptr;
 ULONG_PTR g_gdiplusToken = 0;
 Gdiplus::Image *g_bgImage = nullptr;
 HBITMAP g_bgBitmap = nullptr;

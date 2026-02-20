@@ -55,6 +55,11 @@ struct DocumentTabState
 static std::vector<DocumentTabState> g_documents;
 static int g_activeDocument = -1;
 static bool g_switchingDocument = false;
+static std::vector<DocumentTabState> g_closedDocuments;
+static constexpr size_t kMaxClosedDocuments = 20;
+static bool g_updatingTabs = false;
+static bool g_draggingTab = false;
+static int g_dragTabIndex = -1;
 
 static std::wstring NormalizePathForCompare(const std::wstring &path)
 {
@@ -79,6 +84,7 @@ static std::wstring DocumentTabLabel(const DocumentTabState &doc)
     std::wstring label = doc.filePath.empty() ? lang.untitled : PathFindFileNameW(doc.filePath.c_str());
     if (doc.modified)
         label.insert(label.begin(), L'*');
+    label += L"  \x00D7";
     return label;
 }
 
@@ -92,6 +98,41 @@ static void SetDocumentTabLabel(int index)
     std::wstring label = DocumentTabLabel(g_documents[index]);
     item.pszText = label.data();
     TabCtrl_SetItem(g_hwndTabs, index, &item);
+}
+
+static void RebuildTabsControl()
+{
+    if (!g_hwndTabs)
+        return;
+
+    g_updatingTabs = true;
+    TabCtrl_DeleteAllItems(g_hwndTabs);
+
+    for (int i = 0; i < static_cast<int>(g_documents.size()); ++i)
+    {
+        TCITEMW item{};
+        item.mask = TCIF_TEXT;
+        std::wstring label = DocumentTabLabel(g_documents[i]);
+        item.pszText = label.data();
+        TabCtrl_InsertItem(g_hwndTabs, i, &item);
+    }
+
+    if (g_activeDocument >= 0 && g_activeDocument < static_cast<int>(g_documents.size()))
+        TabCtrl_SetCurSel(g_hwndTabs, g_activeDocument);
+    g_updatingTabs = false;
+}
+
+static bool IsTabCloseHotspot(int index, POINT ptClient)
+{
+    if (!g_hwndTabs || index < 0 || index >= TabCtrl_GetItemCount(g_hwndTabs))
+        return false;
+
+    RECT rc{};
+    if (!TabCtrl_GetItemRect(g_hwndTabs, index, &rc))
+        return false;
+
+    const int closeLeft = rc.right - 18;
+    return ptClient.x >= closeLeft && ptClient.x <= rc.right - 4 && ptClient.y >= rc.top + 2 && ptClient.y <= rc.bottom - 2;
 }
 
 static void SyncDocumentFromState(int index, bool includeText)
@@ -256,15 +297,28 @@ static void OpenFileInNewDocumentTabDialog()
         OpenPathInTabs(path);
 }
 
-static void CloseCurrentDocumentTab()
+static void PushClosedDocument(const DocumentTabState &doc)
 {
-    if (g_activeDocument < 0 || g_activeDocument >= static_cast<int>(g_documents.size()))
+    if (doc.filePath.empty() && doc.text.empty() && !doc.modified)
         return;
+
+    g_closedDocuments.push_back(doc);
+    if (g_closedDocuments.size() > kMaxClosedDocuments)
+        g_closedDocuments.erase(g_closedDocuments.begin());
+}
+
+static void CloseDocumentTabAt(int index)
+{
+    if (index < 0 || index >= static_cast<int>(g_documents.size()))
+        return;
+
+    SwitchToDocument(index);
 
     if (g_documents.size() <= 1)
     {
         if (!ConfirmDiscard())
             return;
+        PushClosedDocument(g_documents[g_activeDocument]);
         FileNew();
         SyncDocumentFromState(g_activeDocument, true);
         return;
@@ -273,20 +327,55 @@ static void CloseCurrentDocumentTab()
     if (!ConfirmDiscard())
         return;
 
-    const int closingIndex = g_activeDocument;
+    const int closingIndex = index;
+    PushClosedDocument(g_documents[closingIndex]);
     g_documents.erase(g_documents.begin() + closingIndex);
-    if (g_hwndTabs)
-        TabCtrl_DeleteItem(g_hwndTabs, closingIndex);
 
     int nextIndex = closingIndex;
     if (nextIndex >= static_cast<int>(g_documents.size()))
         nextIndex = static_cast<int>(g_documents.size()) - 1;
 
     g_activeDocument = nextIndex;
-    if (g_hwndTabs)
-        TabCtrl_SetCurSel(g_hwndTabs, nextIndex);
+    RebuildTabsControl();
     LoadStateFromDocument(nextIndex);
     RefreshAllDocumentTabLabels();
+}
+
+static void CloseCurrentDocumentTab()
+{
+    CloseDocumentTabAt(g_activeDocument);
+}
+
+static void ReopenClosedDocumentTab()
+{
+    if (g_closedDocuments.empty())
+        return;
+
+    if (g_activeDocument >= 0)
+        SyncDocumentFromState(g_activeDocument, true);
+
+    DocumentTabState doc = g_closedDocuments.back();
+    g_closedDocuments.pop_back();
+    g_documents.push_back(doc);
+    g_activeDocument = static_cast<int>(g_documents.size()) - 1;
+    RebuildTabsControl();
+    LoadStateFromDocument(g_activeDocument);
+}
+
+static void ReorderDocumentTab(int fromIndex, int toIndex)
+{
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= static_cast<int>(g_documents.size()) || toIndex >= static_cast<int>(g_documents.size()))
+        return;
+    if (fromIndex == toIndex)
+        return;
+
+    std::swap(g_documents[fromIndex], g_documents[toIndex]);
+    if (g_activeDocument == fromIndex)
+        g_activeDocument = toIndex;
+    else if (g_activeDocument == toIndex)
+        g_activeDocument = fromIndex;
+
+    RebuildTabsControl();
 }
 
 static void SwitchToNextDocumentTab(bool backward)
@@ -331,6 +420,83 @@ static bool ConfirmDiscardAllDocuments()
     return true;
 }
 
+static LRESULT CALLBACK TabsSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_LBUTTONDOWN:
+    {
+        POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        TCHITTESTINFO hit{};
+        hit.pt = pt;
+        int index = TabCtrl_HitTest(hwnd, &hit);
+        if (index >= 0 && !IsTabCloseHotspot(index, pt))
+        {
+            g_draggingTab = true;
+            g_dragTabIndex = index;
+            SetCapture(hwnd);
+        }
+        break;
+    }
+    case WM_MOUSEMOVE:
+    {
+        if (!g_draggingTab || GetCapture() != hwnd)
+            break;
+
+        POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        TCHITTESTINFO hit{};
+        hit.pt = pt;
+        int hoverIndex = TabCtrl_HitTest(hwnd, &hit);
+        if (hoverIndex >= 0 && hoverIndex != g_dragTabIndex)
+        {
+            ReorderDocumentTab(g_dragTabIndex, hoverIndex);
+            g_dragTabIndex = hoverIndex;
+        }
+        break;
+    }
+    case WM_LBUTTONUP:
+    {
+        POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        TCHITTESTINFO hit{};
+        hit.pt = pt;
+        int index = TabCtrl_HitTest(hwnd, &hit);
+
+        if (g_draggingTab)
+        {
+            g_draggingTab = false;
+            g_dragTabIndex = -1;
+            if (GetCapture() == hwnd)
+                ReleaseCapture();
+        }
+
+        if (index >= 0 && IsTabCloseHotspot(index, pt))
+        {
+            CloseDocumentTabAt(index);
+            return 0;
+        }
+        break;
+    }
+    case WM_MBUTTONUP:
+    {
+        POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        TCHITTESTINFO hit{};
+        hit.pt = pt;
+        int index = TabCtrl_HitTest(hwnd, &hit);
+        if (index >= 0)
+        {
+            CloseDocumentTabAt(index);
+            return 0;
+        }
+        break;
+    }
+    case WM_CAPTURECHANGED:
+        g_draggingTab = false;
+        g_dragTabIndex = -1;
+        break;
+    }
+    return CallWindowProcW(g_origTabsProc, hwnd, msg, wParam, lParam);
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
@@ -368,12 +534,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         g_origEditorProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hwndEditor, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(EditorSubclassProc)));
         ConfigureEditorControl(g_hwndEditor);
         g_hwndTabs = CreateWindowExW(0, WC_TABCONTROLW, L"",
-                                     WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP,
+                                     WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | TCS_HOTTRACK | TCS_FOCUSNEVER,
                                      0, 0, 100, 30, hwnd, reinterpret_cast<HMENU>(IDC_TABS), GetModuleHandleW(nullptr), nullptr);
         if (g_hwndTabs)
         {
             HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             SendMessageW(g_hwndTabs, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
+            g_origTabsProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hwndTabs, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(TabsSubclassProc)));
         }
         g_hwndStatus = CreateWindowExW(0, STATUSCLASSNAMEW, nullptr,
                                        WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STATUSBAR), GetModuleHandleW(nullptr), nullptr);
@@ -682,6 +849,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         case IDM_FILE_CLOSETAB:
             CloseCurrentDocumentTab();
             break;
+        case IDM_FILE_REOPENCLOSEDTAB:
+            ReopenClosedDocumentTab();
+            break;
         case IDM_FILE_NEXTTAB:
             SwitchToNextDocumentTab(false);
             break;
@@ -870,6 +1040,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         NMHDR *pnmh = reinterpret_cast<NMHDR *>(lParam);
         if (pnmh->hwndFrom == g_hwndTabs && pnmh->code == TCN_SELCHANGE)
         {
+            if (g_updatingTabs)
+                return 0;
             int index = TabCtrl_GetCurSel(g_hwndTabs);
             SwitchToDocument(index);
             return 0;
@@ -893,8 +1065,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             const auto &lang = GetLangStrings();
             AppendMenuW(hPopup, MF_STRING, IDM_FILE_NEW, MenuLabelForContext(lang.menuNew).c_str());
             AppendMenuW(hPopup, MF_STRING, IDM_FILE_CLOSETAB, L"Close Tab");
+            AppendMenuW(hPopup, MF_STRING, IDM_FILE_REOPENCLOSEDTAB, L"Reopen Closed Tab");
             if (g_documents.size() <= 1)
                 EnableMenuItem(hPopup, IDM_FILE_CLOSETAB, MF_BYCOMMAND | MF_GRAYED);
+            if (g_closedDocuments.empty())
+                EnableMenuItem(hPopup, IDM_FILE_REOPENCLOSEDTAB, MF_BYCOMMAND | MF_GRAYED);
 
             UINT cmd = TrackPopupMenu(hPopup, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
                                       pt.x, pt.y, 0, hwnd, nullptr);
