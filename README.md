@@ -87,9 +87,9 @@ Setelah repo kamu terhubung ke GitHub:
    - `git push origin v1.3.0`
 2. Wait for `Build and Release` GitHub Actions workflow to finish.
 3. Buka halaman `Releases` dan unduh salah satu file:
-   - `saka-note-x64-portable.zip` (recommended for most users)
-   - `saka-note-ARM64-portable.zip` (ARM devices)
-   - `saka-note-*.exe` (installer, if generated)
+   - `saka-note-setup-x64.exe` (recommended for most users; creates Start Menu entry)
+   - `saka-note-portable-x64.zip` (portable; no install required)
+   - `saka-note-setup-ARM64.exe` / `saka-note-portable-ARM64.zip` (ARM devices)
 4. For portable zip:
    - extract zip,
    - run `saka-note.exe`.
