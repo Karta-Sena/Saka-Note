@@ -41,6 +41,11 @@ Detail atribusi dan log modifikasi:
 - See detailed roadmap: `docs/roadmap.md`.
 - Lihat roadmap detail: `docs/roadmap.md`.
 
+## Testing and Research Docs
+
+- Claim test protocol / Protokol uji klaim: `docs/testing/claim-test-protocol.md`.
+- Librarian research notes / Catatan riset: `docs/research/librarian-research-notepad-2026-02.md`.
+
 ## Requirements / Kebutuhan
 
 - Windows 7 SP1+ (Windows 10/11 recommended). / Windows 7 SP1+ (Windows 10/11 disarankan).
@@ -145,11 +150,13 @@ src/
   main.cpp
   notepad.rc
 tools/
-research/
 docs/
+research/ (generated benchmark outputs; gitignored)
+
 ```
 
 ## License / Lisensi
 
 MIT License. See `LICENSE`.  
 Lisensi MIT. Lihat `LICENSE`.
+

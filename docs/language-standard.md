@@ -15,7 +15,8 @@ Goal / Tujuan:
 Apply to / Berlaku untuk:
 - `README.md`
 - `docs/*.md`
-- `research/*.md`
+- `docs/research/*.md`
+- `docs/testing/*.md`
 - Release notes and benchmark reports / Catatan rilis dan laporan benchmark
 
 ## Core Rules / Aturan Inti
@@ -63,3 +64,4 @@ Before merge:
 - Istilah teknis konsisten dengan file ini.
 - No informal insults or ambiguous wording.
 - Tidak ada hinaan informal atau kalimat ambigu.
+
