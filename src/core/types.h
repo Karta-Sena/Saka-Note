@@ -8,15 +8,20 @@
 #pragma once
 
 #include <windows.h>
+#include <cstddef>
 #include <string>
 #include <deque>
 
-#define APP_NAME L"Notepad"
-#define APP_VERSION L"1.2.0"
+#define APP_NAME L"Saka Note"
+#define APP_VERSION L"1.3.0"
+#define APP_GITHUB_OWNER L"Karta-Sena"
+#define APP_GITHUB_REPO L"Saka-Note"
+#define APP_REPOSITORY_URL L"https://github.com/Karta-Sena/Saka-Note"
 #define ZOOM_MIN 25
 #define ZOOM_MAX 500
 #define ZOOM_DEFAULT 100
 #define MAX_RECENT_FILES 10
+constexpr size_t LARGE_FILE_MODE_THRESHOLD_BYTES = 5u * 1024u * 1024u;
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
@@ -61,6 +66,12 @@ enum class Theme
     Light,
     Dark
 };
+enum class StartupBehavior
+{
+    Classic,
+    ResumeAll,
+    ResumeSaved
+};
 enum PreferredAppMode
 {
     Default,
@@ -103,7 +114,7 @@ struct AppState
     LineEnding lineEnding = LineEnding::CRLF;
     std::wstring findText;
     std::wstring replaceText;
-    bool wordWrap = false;
+    bool wordWrap = true;
     int zoomLevel = ZOOM_DEFAULT;
     bool showStatusBar = true;
     Theme theme = Theme::System;
@@ -125,6 +136,10 @@ struct AppState
     BackgroundSettings background;
     std::wstring customIconPath;
     int customIconIndex = 0;
+    bool useTabs = true;
+    StartupBehavior startupBehavior = StartupBehavior::ResumeAll;
+    bool largeFileMode = false;
+    size_t largeFileBytes = 0;
 };
 
 typedef BOOL(WINAPI *fnAllowDarkModeForWindow)(HWND hWnd, BOOL allow);

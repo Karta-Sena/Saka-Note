@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(legacy-notepad VERSION 0.1.0 LANGUAGES CXX)
+project(saka-note VERSION 1.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,7 +25,7 @@ else()
     endif()
 endif()
 
-add_executable(legacy-notepad WIN32
+add_executable(saka-note WIN32
     src/main.cpp
     src/core/globals.cpp
     src/lang/lang.cpp
@@ -41,10 +41,10 @@ add_executable(legacy-notepad WIN32
     src/notepad.rc
 )
 
-target_include_directories(legacy-notepad PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/modules)
-target_compile_definitions(legacy-notepad PRIVATE UNICODE _UNICODE)
+target_include_directories(saka-note PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/modules)
+target_compile_definitions(saka-note PRIVATE UNICODE _UNICODE)
 
-target_link_libraries(legacy-notepad PRIVATE
+target_link_libraries(saka-note PRIVATE
     comctl32
     shlwapi
     comdlg32
@@ -60,34 +60,34 @@ target_link_libraries(legacy-notepad PRIVATE
 )
 
 if(NOT MSVC)
-    target_link_options(legacy-notepad PRIVATE -mwindows -municode)
+    target_link_options(saka-note PRIVATE -mwindows -municode)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        target_link_options(legacy-notepad PRIVATE -static)
-        target_link_libraries(legacy-notepad PRIVATE -static-libgcc -static-libstdc++)
+        target_link_options(saka-note PRIVATE -static)
+        target_link_libraries(saka-note PRIVATE -static-libgcc -static-libstdc++)
     endif()
     if(CMAKE_STRIP)
-        add_custom_command(TARGET legacy-notepad POST_BUILD COMMAND ${CMAKE_STRIP} --strip-all $<TARGET_FILE:legacy-notepad>)
+        add_custom_command(TARGET saka-note POST_BUILD COMMAND ${CMAKE_STRIP} --strip-all $<TARGET_FILE:saka-note>)
     endif()
 endif()
 
 # Installation
-install(TARGETS legacy-notepad DESTINATION .)
+install(TARGETS saka-note DESTINATION .)
 install(FILES LICENSE README.md DESTINATION .)
 
 # Installer / packaging (CPack with NSIS)
 set(CPACK_GENERATOR "NSIS")
-set(CPACK_PACKAGE_NAME "legacy-notepad")
-set(CPACK_PACKAGE_VENDOR "Legacy Notepad")
+set(CPACK_PACKAGE_NAME "saka-note")
+set(CPACK_PACKAGE_VENDOR "Saka Studio & Engineering")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 if(CMAKE_GENERATOR_PLATFORM)
-    set(CPACK_PACKAGE_FILE_NAME "legacy-notepad-${PROJECT_VERSION}-${CMAKE_GENERATOR_PLATFORM}")
+    set(CPACK_PACKAGE_FILE_NAME "saka-note-${PROJECT_VERSION}-${CMAKE_GENERATOR_PLATFORM}")
 else()
-    set(CPACK_PACKAGE_FILE_NAME "legacy-notepad-${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_FILE_NAME "saka-note-${PROJECT_VERSION}")
 endif()
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
-set(CPACK_NSIS_DISPLAY_NAME "Legacy Notepad")
-set(CPACK_NSIS_PACKAGE_NAME "Legacy Notepad")
-set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/ForLoopCodes/legacy-notepad")
+set(CPACK_NSIS_DISPLAY_NAME "Saka Note")
+set(CPACK_NSIS_PACKAGE_NAME "Saka Note")
+set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/Karta-Sena/Saka-Note")
 set(CPACK_NSIS_MODIFY_PATH ON)
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/src/icon.ico")
