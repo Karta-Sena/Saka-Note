@@ -31,6 +31,24 @@ jobs:
       - name: Build
         run: cmake --build build-${{ matrix.arch }} --config Release
 
+      - name: Binary Size Gate
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/saka-note.exe"
+          $sizeBytes = (Get-Item $exe).Length
+          $limitMb = 8
+          $limitBytes = $limitMb * 1MB
+          Write-Host "saka-note.exe size: $([math]::Round($sizeBytes / 1MB, 2)) MB (limit: $limitMb MB)"
+          if ($sizeBytes -gt $limitBytes) {
+            throw "Binary size gate failed: $sizeBytes bytes exceeds $limitBytes bytes."
+          }
+
+      - name: Run Core Logic Tests (x64)
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          ctest --test-dir "build-${{ matrix.arch }}" -C Release --output-on-failure
+
       - name: Run Performance Benchmark Gate (x64)
         if: matrix.arch == 'x64'
         shell: pwsh

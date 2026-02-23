@@ -23,6 +23,8 @@ void UpdateMenuStrings()
     {
         ModifyMenuW(hFileMenu, IDM_FILE_NEW, MF_BYCOMMAND | MF_STRING, IDM_FILE_NEW, lang.menuNew.c_str());
         ModifyMenuW(hFileMenu, IDM_FILE_OPEN, MF_BYCOMMAND | MF_STRING, IDM_FILE_OPEN, lang.menuOpen.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_CLOSETAB, MF_BYCOMMAND | MF_STRING, IDM_FILE_CLOSETAB, lang.menuCloseTab.c_str());
+        ModifyMenuW(hFileMenu, IDM_FILE_REOPENCLOSEDTAB, MF_BYCOMMAND | MF_STRING, IDM_FILE_REOPENCLOSEDTAB, lang.menuReopenClosedTab.c_str());
         ModifyMenuW(hFileMenu, IDM_FILE_SAVE, MF_BYCOMMAND | MF_STRING, IDM_FILE_SAVE, lang.menuSave.c_str());
         ModifyMenuW(hFileMenu, IDM_FILE_SAVEAS, MF_BYCOMMAND | MF_STRING, IDM_FILE_SAVEAS, lang.menuSaveAs.c_str());
         ModifyMenuW(hFileMenu, IDM_FILE_PRINT, MF_BYCOMMAND | MF_STRING, IDM_FILE_PRINT, lang.menuPrint.c_str());

@@ -23,3 +23,8 @@ void SetBackgroundPosition(BgPosition pos);
 void ViewSelectBackground();
 void ViewClearBackground();
 void ViewBackgroundOpacity();
+
+// Starts GDI+ on demand for background rendering.
+bool EnsureBackgroundGraphicsReady();
+// Frees GDI+ runtime when background rendering is no longer needed.
+void ShutdownBackgroundGraphics();

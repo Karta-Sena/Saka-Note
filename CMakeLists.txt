@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 option(LEGACY_NOTEPAD_WERROR "Treat warnings as errors" OFF)
+option(SAKA_NOTE_BUILD_TESTS "Build lightweight logic tests" ON)
 
 if(MSVC)
     add_compile_options(/W4 /WX /permissive- /utf-8)
@@ -27,22 +28,34 @@ endif()
 
 add_executable(saka-note WIN32
     src/main.cpp
+    src/core/crash_diagnostics.cpp
+    src/core/file_dialog_filters.cpp
     src/core/globals.cpp
+    src/core/session_io.cpp
+    src/core/text_codec.cpp
+    src/core/versioning.cpp
     src/lang/lang.cpp
     src/modules/theme.cpp
     src/modules/editor.cpp
     src/modules/file.cpp
     src/modules/ui.cpp
     src/modules/background.cpp
+    src/modules/command_routing.cpp
     src/modules/dialog.cpp
     src/modules/commands.cpp
+    src/modules/icon_actions.cpp
+    src/modules/perf_benchmark.cpp
+    src/modules/tab_layout.cpp
+    src/modules/tab_model_ops.cpp
+    src/modules/tab_session_io.cpp
+    src/modules/update_check.cpp
     src/modules/menu.cpp
     src/modules/settings.cpp
     src/notepad.rc
 )
 
 target_include_directories(saka-note PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/modules)
-target_compile_definitions(saka-note PRIVATE UNICODE _UNICODE NOMINMAX)
+target_compile_definitions(saka-note PRIVATE UNICODE _UNICODE NOMINMAX SAKA_NOTE_SPLIT_COMMAND_MODULES=1)
 
 target_link_libraries(saka-note PRIVATE
     comctl32
@@ -74,6 +87,52 @@ if(NOT MSVC)
     if(CMAKE_STRIP)
         add_custom_command(TARGET saka-note POST_BUILD COMMAND ${CMAKE_STRIP} --strip-all $<TARGET_FILE:saka-note>)
     endif()
+endif()
+
+if(SAKA_NOTE_BUILD_TESTS)
+    enable_testing()
+    add_executable(saka-note-versioning-tests
+        tests/versioning_tests.cpp
+        src/core/versioning.cpp
+    )
+    target_include_directories(saka-note-versioning-tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(saka-note-versioning-tests PRIVATE UNICODE _UNICODE NOMINMAX)
+    add_test(NAME saka-note-versioning-tests COMMAND saka-note-versioning-tests)
+
+    add_executable(saka-note-encoding-tests
+        tests/encoding_tests.cpp
+        src/core/text_codec.cpp
+    )
+    target_include_directories(saka-note-encoding-tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(saka-note-encoding-tests PRIVATE UNICODE _UNICODE NOMINMAX)
+    add_test(NAME saka-note-encoding-tests COMMAND saka-note-encoding-tests)
+
+    add_executable(saka-note-session-io-tests
+        tests/session_io_tests.cpp
+        src/core/session_io.cpp
+    )
+    target_include_directories(saka-note-session-io-tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(saka-note-session-io-tests PRIVATE UNICODE _UNICODE NOMINMAX)
+    add_test(NAME saka-note-session-io-tests COMMAND saka-note-session-io-tests)
+
+    add_executable(saka-note-tab-session-io-tests
+        tests/tab_session_io_tests.cpp
+        src/core/session_io.cpp
+        src/core/text_codec.cpp
+        src/modules/tab_session_io.cpp
+    )
+    target_include_directories(saka-note-tab-session-io-tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/modules)
+    target_compile_definitions(saka-note-tab-session-io-tests PRIVATE UNICODE _UNICODE NOMINMAX)
+    target_link_libraries(saka-note-tab-session-io-tests PRIVATE shlwapi)
+    add_test(NAME saka-note-tab-session-io-tests COMMAND saka-note-tab-session-io-tests)
+
+    add_executable(saka-note-tab-model-ops-tests
+        tests/tab_model_ops_tests.cpp
+        src/modules/tab_model_ops.cpp
+    )
+    target_include_directories(saka-note-tab-model-ops-tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/modules)
+    target_compile_definitions(saka-note-tab-model-ops-tests PRIVATE UNICODE _UNICODE NOMINMAX)
+    add_test(NAME saka-note-tab-model-ops-tests COMMAND saka-note-tab-model-ops-tests)
 endif()
 
 # Installation

@@ -157,8 +157,10 @@ void ApplyFont()
     size = (size < 8) ? 8 : (size > 500) ? 500
                                          : size;
     HDC hdc = GetDC(g_hwndMain);
-    int height = -MulDiv(size, GetDeviceCaps(hdc, LOGPIXELSY), 72);
-    ReleaseDC(g_hwndMain, hdc);
+    const int dpiY = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
+    if (hdc)
+        ReleaseDC(g_hwndMain, hdc);
+    int height = -MulDiv(size, (dpiY > 0) ? dpiY : 96, 72);
     g_state.hFont = CreateFontW(height, 0, 0, 0, g_state.fontWeight, g_state.fontItalic, g_state.fontUnderline, FALSE,
                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                 DEFAULT_PITCH | FF_DONTCARE, g_state.fontName.c_str());
@@ -254,14 +256,23 @@ LRESULT CALLBACK EditorSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             if (g_bgBitmap)
             {
                 HDC hdc = reinterpret_cast<HDC>(wParam);
+                if (!hdc)
+                    break;
                 RECT rc;
                 GetClientRect(hwnd, &rc);
                 HDC hdcMem = CreateCompatibleDC(hdc);
-                HBITMAP hOldBmp = reinterpret_cast<HBITMAP>(SelectObject(hdcMem, g_bgBitmap));
-                BitBlt(hdc, 0, 0, rc.right, rc.bottom, hdcMem, 0, 0, SRCCOPY);
-                SelectObject(hdcMem, hOldBmp);
-                DeleteDC(hdcMem);
-                return 1;
+                if (hdcMem)
+                {
+                    HBITMAP hOldBmp = reinterpret_cast<HBITMAP>(SelectObject(hdcMem, g_bgBitmap));
+                    if (hOldBmp && reinterpret_cast<HGDIOBJ>(hOldBmp) != HGDI_ERROR)
+                    {
+                        BitBlt(hdc, 0, 0, rc.right, rc.bottom, hdcMem, 0, 0, SRCCOPY);
+                        SelectObject(hdcMem, hOldBmp);
+                        DeleteDC(hdcMem);
+                        return 1;
+                    }
+                    DeleteDC(hdcMem);
+                }
             }
         }
         break;

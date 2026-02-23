@@ -20,6 +20,13 @@ Audit highlights:
 ## P1 - Stability and Architecture (Now)
 
 Goal / Tujuan: turunkan risiko bug regresi, rapikan arsitektur internal.
+Status: Completed on February 23, 2026.
+
+- Completed deliverables:
+  - `main.cpp` responsibilities split into tab/session helpers, window/layout controller (`tab_layout`), and shared command routing (`command_routing`).
+  - `commands.cpp` split into focused modules (`update_check`, `perf_benchmark`, `icon_actions`).
+  - core logic test harness expanded (versioning, encoding, session I/O, tab model/session snapshots).
+  - minimal crash diagnostics shipped (opt-in startup logs + opt-in minidump).
 
 - Split `src/main.cpp` into focused units:
   - tab/session controller

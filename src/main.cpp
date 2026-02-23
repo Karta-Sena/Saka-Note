@@ -21,6 +21,8 @@
 #include <cwctype>
 
 #include "resource.h"
+#include "core/crash_diagnostics.h"
+#include "core/file_dialog_filters.h"
 #include "core/types.h"
 #include "core/globals.h"
 #include "modules/theme.h"
@@ -28,10 +30,15 @@
 #include "modules/file.h"
 #include "modules/ui.h"
 #include "modules/background.h"
+#include "modules/command_routing.h"
 #include "modules/dialog.h"
 #include "modules/commands.h"
 #include "modules/settings.h"
 #include "modules/menu.h"
+#include "modules/tab_document.h"
+#include "modules/tab_layout.h"
+#include "modules/tab_model_ops.h"
+#include "modules/tab_session_io.h"
 #include "lang/lang.h"
 
 static std::wstring MenuLabelForContext(const std::wstring &menuText)
@@ -44,23 +51,12 @@ static std::wstring MenuLabelForContext(const std::wstring &menuText)
     return cleaned;
 }
 
-struct DocumentTabState
-{
-    std::wstring text;
-    std::wstring filePath;
-    bool modified = false;
-    Encoding encoding = Encoding::UTF8;
-    LineEnding lineEnding = LineEnding::CRLF;
-    bool largeFileMode = false;
-    size_t sourceBytes = 0;
-    bool needsReloadFromDisk = false;
-};
-
 static std::vector<DocumentTabState> g_documents;
 static int g_activeDocument = -1;
 static bool g_switchingDocument = false;
 static std::vector<DocumentTabState> g_closedDocuments;
 static constexpr size_t kMaxClosedDocuments = 20;
+static constexpr size_t kTabMemoryCompactThresholdBytes = 256 * 1024;
 static bool g_updatingTabs = false;
 static bool g_draggingTab = false;
 static int g_dragTabIndex = -1;
@@ -68,13 +64,11 @@ static int g_hoverTabIndex = -1;
 static bool g_hoverTabClose = false;
 static bool g_trackingTabsMouse = false;
 static bool g_tabsCustomDrawObserved = false;
-static int g_tabsDpi = 96;
-static HFONT g_hTabFontRegular = nullptr;
-static HFONT g_hTabFontActive = nullptr;
 static constexpr DWORD kSessionMagic = 0x4C4E5331; // "LNS1"
 static constexpr DWORD kSessionVersion = 1;
 static constexpr DWORD kSessionMaxDocuments = 64;
 static constexpr DWORD kSessionMaxStringChars = 8 * 1024 * 1024;
+static constexpr DWORD kSessionMaxFileBytes = 64 * 1024 * 1024;
 static constexpr UINT_PTR kSessionAutosaveTimerId = 0x4C4E01;
 static constexpr UINT kSessionAutosaveIntervalMs = 1500;
 static constexpr DWORD kSessionRetryBackoffMs = 10000;
@@ -103,11 +97,8 @@ static void UpdateRuntimeMenuStates();
 static void RebuildTabsControl();
 static void LoadStateFromDocument(int index);
 static bool OpenPathInTabs(const std::wstring &path, bool forceReplaceCurrent = false);
-static void RefreshTabsDpi();
 static void ResetActiveDocumentToUntitled();
 static bool ConfirmCloseForCurrentStartupBehavior();
-static std::wstring ToWin32IoPath(const std::wstring &path);
-static bool PathExistsForSession(const std::wstring &path);
 
 static UINT StartupBehaviorMenuId(StartupBehavior behavior)
 {
@@ -123,16 +114,6 @@ static UINT StartupBehaviorMenuId(StartupBehavior behavior)
     }
 }
 
-static size_t EstimateTextBytes(const std::wstring &text)
-{
-    return text.size() * sizeof(wchar_t);
-}
-
-static bool ShouldUseLargeFileMode(size_t bytes)
-{
-    return bytes >= LARGE_FILE_MODE_THRESHOLD_BYTES;
-}
-
 static void EnsureSingleDocumentModel(bool captureEditorText)
 {
     DocumentTabState doc;
@@ -145,8 +126,8 @@ static void EnsureSingleDocumentModel(bool captureEditorText)
     doc.modified = g_state.modified;
     doc.encoding = g_state.encoding;
     doc.lineEnding = g_state.lineEnding;
-    doc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateTextBytes(doc.text);
-    doc.largeFileMode = g_state.largeFileMode || ShouldUseLargeFileMode(doc.sourceBytes);
+    doc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateDocumentTextBytes(doc.text);
+    doc.largeFileMode = g_state.largeFileMode || ShouldUseLargeDocumentMode(doc.sourceBytes);
 
     g_documents.clear();
     g_documents.push_back(std::move(doc));
@@ -206,104 +187,6 @@ static void ResetActiveDocumentToUntitled()
     UpdateStatus();
 }
 
-static int ScaleTabsPx(int px)
-{
-    return MulDiv(px, g_tabsDpi, 96);
-}
-
-static void DestroyTabFonts()
-{
-    if (g_hTabFontRegular)
-    {
-        DeleteObject(g_hTabFontRegular);
-        g_hTabFontRegular = nullptr;
-    }
-    if (g_hTabFontActive)
-    {
-        DeleteObject(g_hTabFontActive);
-        g_hTabFontActive = nullptr;
-    }
-}
-
-static void RefreshTabsDpi()
-{
-    HWND ref = g_hwndTabs ? g_hwndTabs : g_hwndMain;
-    if (!ref)
-    {
-        g_tabsDpi = 96;
-        return;
-    }
-
-    HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
-    if (hUser32)
-    {
-        typedef UINT(WINAPI * fnGetDpiForWindow)(HWND);
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-        auto getDpiForWindow = reinterpret_cast<fnGetDpiForWindow>(GetProcAddress(hUser32, "GetDpiForWindow"));
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-        if (getDpiForWindow)
-        {
-            UINT dpi = getDpiForWindow(ref);
-            if (dpi >= 48 && dpi <= 960)
-            {
-                g_tabsDpi = static_cast<int>(dpi);
-                return;
-            }
-        }
-    }
-
-    HDC hdc = GetDC(ref);
-    if (!hdc)
-    {
-        g_tabsDpi = 96;
-        return;
-    }
-
-    const int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
-    ReleaseDC(ref, hdc);
-    g_tabsDpi = (dpi > 0) ? dpi : 96;
-}
-
-static void RefreshTabsVisualMetrics()
-{
-    if (!g_hwndTabs)
-        return;
-
-    DestroyTabFonts();
-
-    LOGFONTW baseLf{};
-    NONCLIENTMETRICSW ncm{};
-    ncm.cbSize = sizeof(ncm);
-    if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0))
-    {
-        baseLf = ncm.lfMessageFont;
-    }
-    else
-    {
-        HFONT stock = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        if (stock)
-            GetObjectW(stock, sizeof(baseLf), &baseLf);
-    }
-
-    baseLf.lfHeight = -ScaleTabsPx(12);
-    baseLf.lfWeight = FW_NORMAL;
-    baseLf.lfQuality = CLEARTYPE_QUALITY;
-    g_hTabFontRegular = CreateFontIndirectW(&baseLf);
-
-    LOGFONTW activeLf = baseLf;
-    activeLf.lfWeight = FW_SEMIBOLD;
-    g_hTabFontActive = CreateFontIndirectW(&activeLf);
-
-    HFONT effectiveFont = g_hTabFontRegular ? g_hTabFontRegular : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-    SendMessageW(g_hwndTabs, WM_SETFONT, reinterpret_cast<WPARAM>(effectiveFont), TRUE);
-    SendMessageW(g_hwndTabs, TCM_SETPADDING, 0, MAKELPARAM(ScaleTabsPx(12), ScaleTabsPx(4)));
-}
-
 static LRESULT CALLBACK MenuPopupCbtHookProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
     if (nCode == HCBT_CREATEWND)
@@ -358,244 +241,6 @@ static UINT TrackPopupMenuLightweight(HMENU hPopup, UINT flags, int x, int y, HW
 
 static void DrawCloseGlyph(HDC hdc, const RECT &rc, COLORREF color);
 
-static bool WriteAllBytes(HANDLE hFile, const void *data, DWORD bytes)
-{
-    const BYTE *cursor = reinterpret_cast<const BYTE *>(data);
-    DWORD remaining = bytes;
-    while (remaining > 0)
-    {
-        DWORD written = 0;
-        if (!WriteFile(hFile, cursor, remaining, &written, nullptr))
-            return false;
-        if (written == 0)
-            return false;
-        cursor += written;
-        remaining -= written;
-    }
-    return true;
-}
-
-static bool ReadAllBytes(HANDLE hFile, void *data, DWORD bytes)
-{
-    BYTE *cursor = reinterpret_cast<BYTE *>(data);
-    DWORD remaining = bytes;
-    while (remaining > 0)
-    {
-        DWORD read = 0;
-        if (!ReadFile(hFile, cursor, remaining, &read, nullptr))
-            return false;
-        if (read == 0)
-            return false;
-        cursor += read;
-        remaining -= read;
-    }
-    return true;
-}
-
-static bool WriteUInt32(HANDLE hFile, DWORD value)
-{
-    return WriteAllBytes(hFile, &value, sizeof(value));
-}
-
-static bool ReadUInt32(HANDLE hFile, DWORD &value)
-{
-    return ReadAllBytes(hFile, &value, sizeof(value));
-}
-
-static bool WriteWideString(HANDLE hFile, const std::wstring &value)
-{
-    if (value.size() > kSessionMaxStringChars)
-        return false;
-
-    const DWORD charCount = static_cast<DWORD>(value.size());
-    if (!WriteUInt32(hFile, charCount))
-        return false;
-    if (charCount == 0)
-        return true;
-    return WriteAllBytes(hFile, value.data(), charCount * sizeof(wchar_t));
-}
-
-static bool ReadWideString(HANDLE hFile, std::wstring &value)
-{
-    DWORD charCount = 0;
-    if (!ReadUInt32(hFile, charCount))
-        return false;
-    if (charCount > kSessionMaxStringChars)
-        return false;
-
-    value.clear();
-    if (charCount == 0)
-        return true;
-
-    value.resize(charCount);
-    return ReadAllBytes(hFile, value.data(), charCount * sizeof(wchar_t));
-}
-
-static bool WriteDocumentRecord(HANDLE hFile, const DocumentTabState &doc)
-{
-    const DWORD modifiedFlag = doc.modified ? 1u : 0u;
-    if (!WriteUInt32(hFile, modifiedFlag))
-        return false;
-    if (!WriteUInt32(hFile, static_cast<DWORD>(doc.encoding)))
-        return false;
-    if (!WriteUInt32(hFile, static_cast<DWORD>(doc.lineEnding)))
-        return false;
-    if (!WriteWideString(hFile, doc.filePath))
-        return false;
-    const bool persistText = doc.filePath.empty() || doc.modified;
-    const std::wstring &textToPersist = persistText ? doc.text : std::wstring();
-    if (!WriteWideString(hFile, textToPersist))
-        return false;
-    return true;
-}
-
-static bool ReadDocumentRecord(HANDLE hFile, DocumentTabState &doc)
-{
-    DWORD modifiedFlag = 0;
-    DWORD encodingValue = 0;
-    DWORD lineEndingValue = 0;
-    if (!ReadUInt32(hFile, modifiedFlag))
-        return false;
-    if (!ReadUInt32(hFile, encodingValue))
-        return false;
-    if (!ReadUInt32(hFile, lineEndingValue))
-        return false;
-    if (!ReadWideString(hFile, doc.filePath))
-        return false;
-    if (!ReadWideString(hFile, doc.text))
-        return false;
-
-    doc.modified = (modifiedFlag != 0);
-    if (encodingValue <= static_cast<DWORD>(Encoding::ANSI))
-        doc.encoding = static_cast<Encoding>(encodingValue);
-    else
-        doc.encoding = Encoding::UTF8;
-
-    if (lineEndingValue <= static_cast<DWORD>(LineEnding::CR))
-        doc.lineEnding = static_cast<LineEnding>(lineEndingValue);
-    else
-        doc.lineEnding = LineEnding::CRLF;
-
-    doc.needsReloadFromDisk = false;
-    if (!doc.modified && doc.text.empty() && !doc.filePath.empty())
-    {
-        doc.sourceBytes = 0;
-        doc.largeFileMode = false;
-        doc.needsReloadFromDisk = true;
-        return true;
-    }
-
-    doc.sourceBytes = EstimateTextBytes(doc.text);
-    doc.largeFileMode = ShouldUseLargeFileMode(doc.sourceBytes);
-    return true;
-}
-
-static bool LoadDocumentTextFromDisk(DocumentTabState &doc)
-{
-    if (doc.filePath.empty())
-        return false;
-
-    const std::wstring ioPath = ToWin32IoPath(doc.filePath);
-    HANDLE hFile = CreateFileW(ioPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE)
-        return false;
-
-    LARGE_INTEGER fileSize = {};
-    if (!GetFileSizeEx(hFile, &fileSize) || fileSize.QuadPart < 0 || fileSize.QuadPart > static_cast<LONGLONG>(MAXDWORD))
-    {
-        CloseHandle(hFile);
-        return false;
-    }
-
-    const DWORD size = static_cast<DWORD>(fileSize.QuadPart);
-    std::vector<BYTE> data(size);
-    if (size > 0 && !ReadAllBytes(hFile, data.data(), size))
-    {
-        CloseHandle(hFile);
-        return false;
-    }
-    CloseHandle(hFile);
-
-    auto [enc, le] = DetectEncoding(data);
-    doc.text = DecodeText(data, enc);
-    doc.encoding = enc;
-    doc.lineEnding = le;
-    doc.sourceBytes = static_cast<size_t>(size);
-    doc.largeFileMode = ShouldUseLargeFileMode(doc.sourceBytes);
-    doc.needsReloadFromDisk = false;
-    doc.modified = false;
-    return true;
-}
-
-static std::wstring SessionFilePath()
-{
-    wchar_t localAppData[MAX_PATH] = {};
-    DWORD len = GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH);
-
-    std::wstring dirPath;
-    if (len > 0 && len < MAX_PATH)
-    {
-        dirPath = localAppData;
-    }
-    else
-    {
-        wchar_t modulePath[MAX_PATH] = {};
-        if (GetModuleFileNameW(nullptr, modulePath, MAX_PATH) == 0)
-            return L"session.dat";
-        PathRemoveFileSpecW(modulePath);
-        dirPath = modulePath;
-    }
-
-    dirPath += L"\\SakaNote";
-    CreateDirectoryW(dirPath.c_str(), nullptr);
-    return dirPath + L"\\session.dat";
-}
-
-static std::wstring ToWin32IoPath(const std::wstring &path)
-{
-    if (path.empty())
-        return path;
-    if (path.rfind(L"\\\\?\\", 0) == 0)
-        return path;
-
-    if (path.rfind(L"\\\\", 0) == 0)
-        return L"\\\\?\\UNC\\" + path.substr(2);
-
-    if (path.size() >= MAX_PATH && path.size() > 2 && path[1] == L':' &&
-        (path[2] == L'\\' || path[2] == L'/'))
-        return L"\\\\?\\" + path;
-
-    return path;
-}
-
-static bool PathExistsForSession(const std::wstring &path)
-{
-    if (path.empty())
-        return false;
-
-    const std::wstring ioPath = ToWin32IoPath(path);
-    const DWORD attrs = GetFileAttributesW(ioPath.c_str());
-    return attrs != INVALID_FILE_ATTRIBUTES && ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0);
-}
-
-static std::wstring NormalizePathForCompare(const std::wstring &path)
-{
-    if (path.empty())
-        return {};
-
-    wchar_t fullPath[MAX_PATH] = {};
-    DWORD len = GetFullPathNameW(path.c_str(), MAX_PATH, fullPath, nullptr);
-    std::wstring normalized;
-    if (len > 0 && len < MAX_PATH)
-        normalized = fullPath;
-    else
-        normalized = path;
-
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(), towlower);
-    return normalized;
-}
-
 static std::wstring DocumentTabLabel(const DocumentTabState &doc)
 {
     const auto &lang = GetLangStrings();
@@ -608,8 +253,8 @@ static std::wstring DocumentTabLabel(const DocumentTabState &doc)
 static RECT TabCloseRect(const RECT &itemRect)
 {
     RECT rc = itemRect;
-    const int closeSize = ScaleTabsPx(14);
-    const int rightPadding = ScaleTabsPx(8);
+    const int closeSize = TabScalePx(14);
+    const int rightPadding = TabScalePx(8);
     const int topOffset = ((rc.bottom - rc.top) - closeSize) / 2;
     rc.right -= rightPadding;
     rc.left = rc.right - closeSize;
@@ -622,8 +267,8 @@ static RECT TabTextRect(const RECT &itemRect)
 {
     RECT rc = itemRect;
     const RECT closeRc = TabCloseRect(itemRect);
-    rc.left += ScaleTabsPx(10);
-    rc.right = closeRc.left - ScaleTabsPx(8);
+    rc.left += TabScalePx(10);
+    rc.right = closeRc.left - TabScalePx(8);
     if (rc.right < rc.left)
         rc.right = rc.left;
     return rc;
@@ -701,8 +346,8 @@ static void SyncDocumentFromState(int index, bool includeText)
     doc.modified = g_state.modified;
     doc.encoding = g_state.encoding;
     doc.lineEnding = g_state.lineEnding;
-    doc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateTextBytes(doc.text);
-    doc.largeFileMode = g_state.largeFileMode || ShouldUseLargeFileMode(doc.sourceBytes);
+    doc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateDocumentTextBytes(doc.text);
+    doc.largeFileMode = g_state.largeFileMode || ShouldUseLargeDocumentMode(doc.sourceBytes);
     SetDocumentTabLabel(index);
 }
 
@@ -715,7 +360,7 @@ static void LoadStateFromDocument(int index)
     DocumentTabState &doc = g_documents[index];
     if (doc.needsReloadFromDisk)
     {
-        if (!LoadDocumentTextFromDisk(doc))
+        if (!SessionLoadDocumentTextFromDisk(doc))
         {
             doc.needsReloadFromDisk = false;
             doc.text.clear();
@@ -748,10 +393,13 @@ static void SwitchToDocument(int index)
     if (index == g_activeDocument)
         return;
 
-    if (g_activeDocument >= 0)
-        SyncDocumentFromState(g_activeDocument, true);
+    const int previousIndex = g_activeDocument;
+    if (previousIndex >= 0)
+        SyncDocumentFromState(previousIndex, true);
 
     g_activeDocument = index;
+    if (previousIndex >= 0)
+        TabCompactDocumentTextIfEligible(g_documents, previousIndex, g_activeDocument, kTabMemoryCompactThresholdBytes, SessionPathExists);
     if (g_hwndTabs)
         TabCtrl_SetCurSel(g_hwndTabs, index);
     LoadStateFromDocument(index);
@@ -775,8 +423,8 @@ static void CreateInitialDocumentTabIfNeeded()
     doc.modified = g_state.modified;
     doc.encoding = g_state.encoding;
     doc.lineEnding = g_state.lineEnding;
-    doc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateTextBytes(doc.text);
-    doc.largeFileMode = g_state.largeFileMode || ShouldUseLargeFileMode(doc.sourceBytes);
+    doc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateDocumentTextBytes(doc.text);
+    doc.largeFileMode = g_state.largeFileMode || ShouldUseLargeDocumentMode(doc.sourceBytes);
 
     g_documents.push_back(doc);
     g_activeDocument = 0;
@@ -792,8 +440,9 @@ static void CreateInitialDocumentTabIfNeeded()
 
 static void CreateNewDocumentTab()
 {
-    if (g_activeDocument >= 0)
-        SyncDocumentFromState(g_activeDocument, true);
+    const int previousIndex = g_activeDocument;
+    if (previousIndex >= 0)
+        SyncDocumentFromState(previousIndex, true);
 
     DocumentTabState doc;
     g_documents.push_back(doc);
@@ -810,32 +459,11 @@ static void CreateNewDocumentTab()
     }
 
     g_activeDocument = index;
+    if (previousIndex >= 0)
+        TabCompactDocumentTextIfEligible(g_documents, previousIndex, g_activeDocument, kTabMemoryCompactThresholdBytes, SessionPathExists);
     LoadStateFromDocument(index);
     UpdateRuntimeMenuStates();
     MarkSessionDirty();
-}
-
-static int FindDocumentByPath(const std::wstring &path)
-{
-    const std::wstring needle = NormalizePathForCompare(path);
-    if (needle.empty())
-        return -1;
-
-    for (int i = 0; i < static_cast<int>(g_documents.size()); ++i)
-    {
-        if (NormalizePathForCompare(g_documents[i].filePath) == needle)
-            return i;
-    }
-    return -1;
-}
-
-static bool IsCurrentDocumentEmptyAndUntitled()
-{
-    if (g_activeDocument < 0 || g_activeDocument >= static_cast<int>(g_documents.size()))
-        return false;
-
-    const DocumentTabState &doc = g_documents[g_activeDocument];
-    return doc.filePath.empty() && !doc.modified && doc.text.empty();
 }
 
 static bool OpenPathInTabs(const std::wstring &path, bool forceReplaceCurrent)
@@ -855,7 +483,7 @@ static bool OpenPathInTabs(const std::wstring &path, bool forceReplaceCurrent)
         return true;
     }
 
-    const int existingIndex = FindDocumentByPath(path);
+    const int existingIndex = TabFindDocumentByPath(g_documents, path, SessionNormalizePathForCompare);
     if (existingIndex >= 0)
     {
         SwitchToDocument(existingIndex);
@@ -863,11 +491,11 @@ static bool OpenPathInTabs(const std::wstring &path, bool forceReplaceCurrent)
     }
 
     const int previousIndex = g_activeDocument;
-    if (g_activeDocument >= 0)
-        SyncDocumentFromState(g_activeDocument, true);
 
     bool createdNewTab = false;
-    if (!IsCurrentDocumentEmptyAndUntitled())
+    if (!(g_activeDocument >= 0 &&
+          g_activeDocument < static_cast<int>(g_documents.size()) &&
+          TabIsEmptyUntitled(g_documents[g_activeDocument])))
     {
         CreateNewDocumentTab();
         createdNewTab = true;
@@ -943,13 +571,13 @@ static bool SaveOpenDocumentSession(bool persistPathFallback)
         activeDoc.modified = g_state.modified;
         activeDoc.encoding = g_state.encoding;
         activeDoc.lineEnding = g_state.lineEnding;
-        activeDoc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateTextBytes(activeDoc.text);
-        activeDoc.largeFileMode = g_state.largeFileMode || ShouldUseLargeFileMode(activeDoc.sourceBytes);
+        activeDoc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateDocumentTextBytes(activeDoc.text);
+        activeDoc.largeFileMode = g_state.largeFileMode || ShouldUseLargeDocumentMode(activeDoc.sourceBytes);
     }
 
     const bool resumeAll = (g_state.startupBehavior == StartupBehavior::ResumeAll);
     const bool startupClassic = (g_state.startupBehavior == StartupBehavior::Classic);
-    const std::wstring sessionFilePath = SessionFilePath();
+    const std::wstring sessionFilePath = SessionRuntimeFilePath();
 
     if (startupClassic)
     {
@@ -964,32 +592,14 @@ static bool SaveOpenDocumentSession(bool persistPathFallback)
 
     if (resumeAll)
     {
-        HANDLE hFile = CreateFileW(sessionFilePath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (hFile != INVALID_HANDLE_VALUE)
-        {
-            const DWORD docCount = static_cast<DWORD>(std::min<size_t>(g_documents.size(), kSessionMaxDocuments));
-            DWORD activeDocIndex = 0xFFFFFFFFu;
-            if (g_activeDocument >= 0 && g_activeDocument < static_cast<int>(docCount))
-                activeDocIndex = static_cast<DWORD>(g_activeDocument);
-
-            bool ok = WriteUInt32(hFile, kSessionMagic) &&
-                      WriteUInt32(hFile, kSessionVersion) &&
-                      WriteUInt32(hFile, docCount) &&
-                      WriteUInt32(hFile, activeDocIndex);
-            for (DWORD i = 0; ok && i < docCount; ++i)
-                ok = WriteDocumentRecord(hFile, g_documents[i]);
-
-            CloseHandle(hFile);
-            if (!ok)
-            {
-                DeleteFileW(sessionFilePath.c_str());
-                saveOk = false;
-            }
-        }
-        else
-        {
-            saveOk = false;
-        }
+        saveOk = SessionWriteSnapshot(sessionFilePath,
+                                      g_documents,
+                                      g_activeDocument,
+                                      kSessionMagic,
+                                      kSessionVersion,
+                                      kSessionMaxDocuments,
+                                      kSessionMaxStringChars,
+                                      kSessionMaxFileBytes);
     }
     else
     {
@@ -999,44 +609,8 @@ static bool SaveOpenDocumentSession(bool persistPathFallback)
     if (persistPathFallback)
     {
         std::vector<std::wstring> sessionPaths;
-        std::vector<std::wstring> normalizedPaths;
-        sessionPaths.reserve(g_documents.size());
-        normalizedPaths.reserve(g_documents.size());
-
         int activePathIndex = -1;
-        for (int i = 0; i < static_cast<int>(g_documents.size()); ++i)
-        {
-            const std::wstring &path = g_documents[i].filePath;
-            if (path.empty())
-                continue;
-
-            const std::wstring normalized = NormalizePathForCompare(path);
-            if (normalized.empty())
-                continue;
-
-            int existingIndex = -1;
-            for (int j = 0; j < static_cast<int>(normalizedPaths.size()); ++j)
-            {
-                if (normalizedPaths[j] == normalized)
-                {
-                    existingIndex = j;
-                    break;
-                }
-            }
-
-            if (existingIndex >= 0)
-            {
-                if (i == g_activeDocument)
-                    activePathIndex = existingIndex;
-                continue;
-            }
-
-            normalizedPaths.push_back(normalized);
-            sessionPaths.push_back(path);
-            if (i == g_activeDocument)
-                activePathIndex = static_cast<int>(sessionPaths.size()) - 1;
-        }
-
+        TabBuildPathSessionFallback(g_documents, g_activeDocument, sessionPaths, activePathIndex, SessionNormalizePathForCompare);
         SaveOpenTabsSession(sessionPaths, activePathIndex);
     }
 
@@ -1053,39 +627,20 @@ static bool RestoreOpenDocumentSession()
 
     if (allowUnsavedRestore)
     {
-    const std::wstring sessionFilePath = SessionFilePath();
-    HANDLE hFile = CreateFileW(sessionFilePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile != INVALID_HANDLE_VALUE)
-    {
-        DWORD magic = 0;
-        DWORD version = 0;
-        DWORD docCount = 0;
-        DWORD activeDocIndex = 0xFFFFFFFFu;
-        bool ok = ReadUInt32(hFile, magic) &&
-                  ReadUInt32(hFile, version) &&
-                  ReadUInt32(hFile, docCount) &&
-                  ReadUInt32(hFile, activeDocIndex) &&
-                  magic == kSessionMagic &&
-                  version == kSessionVersion &&
-                  docCount > 0 &&
-                  docCount <= kSessionMaxDocuments;
-
-        std::vector<DocumentTabState> restoredDocs;
-        restoredDocs.reserve(docCount);
-        for (DWORD i = 0; ok && i < docCount; ++i)
+        const std::wstring sessionFilePath = SessionRuntimeFilePath();
+        TabSessionSnapshot snapshot;
+        if (SessionReadSnapshot(sessionFilePath,
+                                snapshot,
+                                kSessionMagic,
+                                kSessionVersion,
+                                kSessionMaxDocuments,
+                                kSessionMaxStringChars,
+                                kSessionMaxFileBytes,
+                                true))
         {
-            DocumentTabState doc;
-            ok = ReadDocumentRecord(hFile, doc);
-            if (ok)
-                restoredDocs.push_back(std::move(doc));
-        }
-        CloseHandle(hFile);
-
-        if (ok && !restoredDocs.empty())
-        {
-            g_documents = std::move(restoredDocs);
+            g_documents = std::move(snapshot.documents);
             g_closedDocuments.clear();
-            g_activeDocument = (activeDocIndex < g_documents.size()) ? static_cast<int>(activeDocIndex) : 0;
+            g_activeDocument = snapshot.activeDocument;
             if (!g_state.useTabs && g_documents.size() > 1)
             {
                 DocumentTabState activeDoc = g_documents[g_activeDocument];
@@ -1100,7 +655,6 @@ static bool RestoreOpenDocumentSession()
             return true;
         }
     }
-    }
 
     std::vector<std::wstring> sessionPaths;
     int activePathIndex = -1;
@@ -1114,7 +668,7 @@ static bool RestoreOpenDocumentSession()
         if (preferred < 0 || preferred >= static_cast<int>(sessionPaths.size()))
             preferred = static_cast<int>(sessionPaths.size()) - 1;
         const std::wstring &path = sessionPaths[preferred];
-        if (path.empty() || !PathExistsForSession(path))
+        if (path.empty() || !SessionPathExists(path))
             return false;
         return OpenPathInTabs(path);
     }
@@ -1122,7 +676,7 @@ static bool RestoreOpenDocumentSession()
     bool openedAny = false;
     for (const auto &path : sessionPaths)
     {
-        if (path.empty() || !PathExistsForSession(path))
+        if (path.empty() || !SessionPathExists(path))
             continue;
         if (OpenPathInTabs(path))
             openedAny = true;
@@ -1134,7 +688,7 @@ static bool RestoreOpenDocumentSession()
     if (activePathIndex < 0 || activePathIndex >= static_cast<int>(sessionPaths.size()))
         return true;
 
-    const int activeDocIndex = FindDocumentByPath(sessionPaths[activePathIndex]);
+    const int activeDocIndex = TabFindDocumentByPath(g_documents, sessionPaths[activePathIndex], SessionNormalizePathForCompare);
     if (activeDocIndex >= 0)
         SwitchToDocument(activeDocIndex);
     UpdateRuntimeMenuStates();
@@ -1143,26 +697,18 @@ static bool RestoreOpenDocumentSession()
 
 static void OpenFileInNewDocumentTabDialog()
 {
+    const auto &lang = GetLangStrings();
+    const std::wstring filter = BuildTextDocumentsFilter(lang);
     wchar_t path[MAX_PATH] = {};
     OPENFILENAMEW ofn{};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = g_hwndMain;
-    ofn.lpstrFilter = L"Text Documents (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter = filter.c_str();
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_ENABLESIZING;
     if (GetOpenFileNameW(&ofn))
         OpenPathInTabs(path);
-}
-
-static void PushClosedDocument(const DocumentTabState &doc)
-{
-    if (doc.filePath.empty() && doc.text.empty() && !doc.modified)
-        return;
-
-    g_closedDocuments.push_back(doc);
-    if (g_closedDocuments.size() > kMaxClosedDocuments)
-        g_closedDocuments.erase(g_closedDocuments.begin());
 }
 
 static void CloseDocumentTabAt(int index)
@@ -1176,7 +722,7 @@ static void CloseDocumentTabAt(int index)
     {
         if (!ConfirmDiscard())
             return;
-        PushClosedDocument(g_documents[g_activeDocument]);
+        TabPushClosedDocument(g_closedDocuments, g_documents[g_activeDocument], kMaxClosedDocuments);
         ResetActiveDocumentToUntitled();
         SyncDocumentFromState(g_activeDocument, true);
         UpdateRuntimeMenuStates();
@@ -1188,7 +734,7 @@ static void CloseDocumentTabAt(int index)
         return;
 
     const int closingIndex = index;
-    PushClosedDocument(g_documents[closingIndex]);
+    TabPushClosedDocument(g_closedDocuments, g_documents[closingIndex], kMaxClosedDocuments);
     g_documents.erase(g_documents.begin() + closingIndex);
 
     int nextIndex = closingIndex;
@@ -1252,6 +798,7 @@ static void ReopenClosedDocumentTab()
     if (g_closedDocuments.empty())
         return;
 
+    const int previousIndex = g_activeDocument;
     if (g_activeDocument >= 0)
         SyncDocumentFromState(g_activeDocument, true);
 
@@ -1259,6 +806,8 @@ static void ReopenClosedDocumentTab()
     g_closedDocuments.pop_back();
     g_documents.push_back(doc);
     g_activeDocument = static_cast<int>(g_documents.size()) - 1;
+    if (previousIndex >= 0)
+        TabCompactDocumentTextIfEligible(g_documents, previousIndex, g_activeDocument, kTabMemoryCompactThresholdBytes, SessionPathExists);
     RebuildTabsControl();
     LoadStateFromDocument(g_activeDocument);
     UpdateRuntimeMenuStates();
@@ -1326,13 +875,13 @@ static void UpdateRuntimeMenuStates()
 
 static void DrawCloseGlyph(HDC hdc, const RECT &rc, COLORREF color)
 {
-    const int thickness = std::max(1, ScaleTabsPx(1));
+    const int thickness = std::max(1, TabScalePx(1));
     HPEN hPen = CreatePen(PS_SOLID, thickness, color);
     if (!hPen)
         return;
     HGDIOBJ oldPen = SelectObject(hdc, hPen);
 
-    const int margin = ScaleTabsPx(4);
+    const int margin = TabScalePx(4);
     MoveToEx(hdc, rc.left + margin, rc.top + margin, nullptr);
     LineTo(hdc, rc.right - margin, rc.bottom - margin);
     MoveToEx(hdc, rc.right - margin, rc.top + margin, nullptr);
@@ -1417,7 +966,7 @@ static void DrawTabStripBackground(HDC hdc, const RECT &rcClient, const TabPaint
 {
     FillSolidRectDc(hdc, rcClient, palette.stripBg);
     RECT separator = rcClient;
-    separator.top = std::max(separator.top, separator.bottom - std::max(1, ScaleTabsPx(1)));
+    separator.top = std::max(separator.top, separator.bottom - std::max(1, TabScalePx(1)));
     RECT activeRect{};
     const bool hasActive = (g_hwndTabs && g_activeDocument >= 0 && TabCtrl_GetItemRect(g_hwndTabs, g_activeDocument, &activeRect));
     if (!hasActive)
@@ -1426,8 +975,8 @@ static void DrawTabStripBackground(HDC hdc, const RECT &rcClient, const TabPaint
         return;
     }
 
-    activeRect.left += ScaleTabsPx(2);
-    activeRect.right -= ScaleTabsPx(2);
+    activeRect.left += TabScalePx(2);
+    activeRect.right -= TabScalePx(2);
 
     RECT leftLine = separator;
     leftLine.right = std::max(leftLine.left, std::min(leftLine.right, activeRect.left));
@@ -1451,29 +1000,29 @@ static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const
     const bool closeHovered = hovered && g_hoverTabClose;
 
     RECT contentRect = rawItemRect;
-    contentRect.left += ScaleTabsPx(2);
-    contentRect.right -= ScaleTabsPx(2);
-    contentRect.top += ScaleTabsPx(2);
-    contentRect.bottom -= selected ? 0 : ScaleTabsPx(4);
+    contentRect.left += TabScalePx(2);
+    contentRect.right -= TabScalePx(2);
+    contentRect.top += TabScalePx(2);
+    contentRect.bottom -= selected ? 0 : TabScalePx(4);
 
     if (selected && g_hwndTabs)
     {
         RECT strip{};
         GetClientRect(g_hwndTabs, &strip);
-        contentRect.bottom = std::max(contentRect.bottom, strip.bottom + ScaleTabsPx(1));
+        contentRect.bottom = std::max(contentRect.bottom, strip.bottom + TabScalePx(1));
     }
 
     const COLORREF itemBg = selected ? palette.activeBg : (hovered ? palette.hoverBg : palette.inactiveBg);
-    DrawRoundedRectDc(hdc, contentRect, selected ? ScaleTabsPx(4) : ScaleTabsPx(5), itemBg, selected ? palette.borderColor : itemBg);
+    DrawRoundedRectDc(hdc, contentRect, selected ? TabScalePx(4) : TabScalePx(5), itemBg, selected ? palette.borderColor : itemBg);
     if (selected)
     {
         // Cover tab bottom stroke so active tab and editor page read as one continuous surface.
         RECT joinRect = contentRect;
-        joinRect.top = std::max(joinRect.top, joinRect.bottom - std::max(1, ScaleTabsPx(2)));
+        joinRect.top = std::max(joinRect.top, joinRect.bottom - std::max(1, TabScalePx(2)));
         FillSolidRectDc(hdc, joinRect, itemBg);
     }
 
-    HFONT drawFont = selected ? g_hTabFontActive : g_hTabFontRegular;
+    HFONT drawFont = selected ? TabGetActiveFont() : TabGetRegularFont();
     HGDIOBJ oldFont = nullptr;
     if (drawFont)
         oldFont = SelectObject(hdc, drawFont);
@@ -1486,8 +1035,8 @@ static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const
     else
     {
         textRect = contentRect;
-        textRect.left += ScaleTabsPx(10);
-        textRect.right -= ScaleTabsPx(10);
+        textRect.left += TabScalePx(10);
+        textRect.right -= TabScalePx(10);
         if (textRect.right < textRect.left)
             textRect.right = textRect.left;
     }
@@ -1502,7 +1051,7 @@ static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const
     {
         RECT closeRect = TabCloseRect(contentRect);
         if (closeHovered)
-            DrawRoundedRectDc(hdc, closeRect, ScaleTabsPx(4), palette.closeHoverBg, palette.closeHoverBg);
+            DrawRoundedRectDc(hdc, closeRect, TabScalePx(4), palette.closeHoverBg, palette.closeHoverBg);
         DrawCloseGlyph(hdc, closeRect, closeHovered ? palette.closeHoverFg : palette.closeColor);
     }
 }
@@ -1587,8 +1136,8 @@ static LRESULT CALLBACK TabsSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     case WM_STYLECHANGED:
     case WM_SETTINGCHANGE:
     case WM_DPICHANGED:
-        RefreshTabsDpi();
-        RefreshTabsVisualMetrics();
+        TabRefreshDpi();
+        TabRefreshVisualMetrics();
         g_tabsCustomDrawObserved = false;
         InvalidateRect(hwnd, nullptr, TRUE);
         break;
@@ -1698,8 +1247,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
     case WM_CREATE:
     {
+        const auto &lang = GetLangStrings();
         g_hwndMain = hwnd;
-        RefreshTabsDpi();
+        TabRefreshDpi();
         DragAcceptFiles(hwnd, TRUE);
         const wchar_t *richEditClass = nullptr;
         if (g_hRichEditModule)
@@ -1722,8 +1272,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             else
             {
                 MessageBoxW(hwnd,
-                            L"Cannot load RichEdit control.\n",
-                            L"Error", MB_ICONERROR | MB_OK);
+                            lang.msgCannotLoadRichEdit.c_str(),
+                            lang.msgError.c_str(),
+                            MB_ICONERROR | MB_OK);
                 return -1;
             }
         }
@@ -1738,11 +1289,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         ConfigureEditorControl(g_hwndEditor);
         g_hwndTabs = CreateWindowExW(0, WC_TABCONTROLW, L"",
                                      WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | TCS_HOTTRACK | TCS_FOCUSNEVER,
-                                     0, 0, 100, ScaleTabsPx(32), hwnd, reinterpret_cast<HMENU>(IDC_TABS), GetModuleHandleW(nullptr), nullptr);
+                                     0, 0, 100, TabScalePx(32), hwnd, reinterpret_cast<HMENU>(IDC_TABS), GetModuleHandleW(nullptr), nullptr);
         if (g_hwndTabs)
         {
-            RefreshTabsDpi();
-            RefreshTabsVisualMetrics();
+            TabRefreshDpi();
+            TabRefreshVisualMetrics();
             SetWindowTheme(g_hwndTabs, L"Explorer", nullptr);
             g_tabsCustomDrawObserved = false;
             g_origTabsProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hwndTabs, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(TabsSubclassProc)));
@@ -1956,7 +1507,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
     }
     case WM_SIZE:
-        RefreshTabsDpi();
+        TabRefreshDpi();
         ResizeControls();
         UpdateStatus();
         return 0;
@@ -2104,6 +1655,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_COMMAND:
     {
         WORD cmd = LOWORD(wParam);
+        const std::wstring preFilePath = g_state.filePath;
+        const bool preModified = g_state.modified;
+        const Encoding preEncoding = g_state.encoding;
+        const LineEnding preLineEnding = g_state.lineEnding;
+        const bool preLargeFileMode = g_state.largeFileMode;
+        const size_t preLargeFileBytes = g_state.largeFileBytes;
+        const size_t preDocumentCount = g_documents.size();
+        const int preActiveDocument = g_activeDocument;
         if (cmd == IDC_EDITOR && HIWORD(wParam) == EN_CHANGE)
         {
             if (g_switchingDocument)
@@ -2168,224 +1727,95 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (g_state.useTabs)
                 SwitchToNextDocumentTab(true);
             break;
-        case IDM_FILE_SAVE:
-            FileSave();
-            break;
-        case IDM_FILE_SAVEAS:
-            FileSaveAs();
-            break;
-        case IDM_FILE_PRINT:
-            FilePrint();
-            break;
-        case IDM_FILE_PAGESETUP:
-            FilePageSetup();
-            break;
-        case IDM_FILE_EXIT:
-            SendMessageW(hwnd, WM_CLOSE, 0, 0);
-            break;
-        case IDM_EDIT_UNDO:
-            EditUndo();
-            break;
-        case IDM_EDIT_REDO:
-            EditRedo();
-            break;
-        case IDM_EDIT_CUT:
-            EditCut();
-            break;
-        case IDM_EDIT_COPY:
-            EditCopy();
-            break;
-        case IDM_EDIT_PASTE:
-            EditPaste();
-            break;
-        case IDM_EDIT_DELETE:
-            EditDelete();
-            break;
-        case IDM_EDIT_FIND:
-            EditFind();
-            break;
-        case IDM_EDIT_FINDNEXT:
-            EditFindNext();
-            break;
-        case IDM_EDIT_FINDPREV:
-            EditFindPrev();
-            break;
-        case IDM_EDIT_REPLACE:
-            EditReplace();
-            break;
-        case IDM_EDIT_GOTO:
-            EditGoto();
-            break;
-        case IDM_EDIT_SELECTALL:
-            EditSelectAll();
-            break;
-        case IDM_EDIT_TIMEDATE:
-            EditTimeDate();
-            break;
-        case IDM_FORMAT_WORDWRAP:
-            if (!g_state.largeFileMode)
-                FormatWordWrap();
-            break;
-        case IDM_FORMAT_FONT:
-            FormatFont();
-            break;
-        case IDM_VIEW_ZOOMIN:
-            ViewZoomIn();
-            break;
-        case IDM_VIEW_ZOOMOUT:
-            ViewZoomOut();
-            break;
-        case IDM_VIEW_ZOOMDEFAULT:
-            ViewZoomDefault();
-            break;
-        case IDM_VIEW_STATUSBAR:
-            ViewStatusBar();
-            break;
-        case IDM_VIEW_DARKMODE:
-            ToggleDarkMode();
-            break;
-        case IDM_VIEW_TRANSPARENCY:
-            ViewTransparency();
-            break;
-        case IDM_VIEW_ALWAYSONTOP:
-            ViewAlwaysOnTop();
-            break;
-        case IDM_VIEW_USETABS:
-            if (g_state.useTabs && g_documents.size() > 1)
+        default:
+            if (RouteStandardCommand(hwnd, cmd))
+                break;
+            switch (cmd)
             {
-                const auto &lang = GetLangStrings();
-                MessageBoxW(hwnd,
-                            L"Close other tabs first, then disable tab mode.",
-                            lang.appName.c_str(),
-                            MB_OK | MB_ICONINFORMATION);
+            case IDM_VIEW_USETABS:
+                if (g_state.useTabs && g_documents.size() > 1)
+                {
+                    const auto &lang = GetLangStrings();
+                    MessageBoxW(hwnd,
+                                lang.msgDisableTabsCloseOthers.c_str(),
+                                lang.appName.c_str(),
+                                MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                ApplyTabsMode(!g_state.useTabs);
+                SaveFontSettings();
+                break;
+            case IDM_VIEW_STARTUP_CLASSIC:
+                g_state.startupBehavior = StartupBehavior::Classic;
+                UpdateRuntimeMenuStates();
+                UpdateSessionAutosaveTimer();
+                SaveOpenDocumentSession(true);
+                SaveFontSettings();
+                g_sessionDirty = false;
+                break;
+            case IDM_VIEW_STARTUP_RESUMEALL:
+                g_state.startupBehavior = StartupBehavior::ResumeAll;
+                UpdateRuntimeMenuStates();
+                UpdateSessionAutosaveTimer();
+                SaveOpenDocumentSession(true);
+                SaveFontSettings();
+                g_sessionDirty = false;
+                break;
+            case IDM_VIEW_STARTUP_RESUMESAVED:
+                g_state.startupBehavior = StartupBehavior::ResumeSaved;
+                UpdateRuntimeMenuStates();
+                UpdateSessionAutosaveTimer();
+                SaveOpenDocumentSession(true);
+                SaveFontSettings();
+                g_sessionDirty = false;
+                break;
+            case IDM_VIEW_LANG_EN:
+                if (g_hwndFindDlg)
+                {
+                    DestroyWindow(g_hwndFindDlg);
+                    g_hwndFindDlg = nullptr;
+                }
+                SetLanguage(LangID::EN);
+                UpdateMenuStrings();
+                UpdateRecentFilesMenu();
+                UpdateLanguageMenu();
+                RefreshAllDocumentTabLabels();
+                UpdateTitle();
+                UpdateStatus();
+                UpdateRuntimeMenuStates();
+                break;
+            case IDM_VIEW_LANG_JA:
+                if (g_hwndFindDlg)
+                {
+                    DestroyWindow(g_hwndFindDlg);
+                    g_hwndFindDlg = nullptr;
+                }
+                SetLanguage(LangID::JA);
+                UpdateMenuStrings();
+                UpdateRecentFilesMenu();
+                UpdateLanguageMenu();
+                RefreshAllDocumentTabLabels();
+                UpdateTitle();
+                UpdateStatus();
+                UpdateRuntimeMenuStates();
+                break;
+            default:
                 break;
             }
-            ApplyTabsMode(!g_state.useTabs);
-            SaveFontSettings();
-            break;
-        case IDM_VIEW_STARTUP_CLASSIC:
-            g_state.startupBehavior = StartupBehavior::Classic;
-            UpdateRuntimeMenuStates();
-            UpdateSessionAutosaveTimer();
-            SaveOpenDocumentSession(true);
-            SaveFontSettings();
-            g_sessionDirty = false;
-            break;
-        case IDM_VIEW_STARTUP_RESUMEALL:
-            g_state.startupBehavior = StartupBehavior::ResumeAll;
-            UpdateRuntimeMenuStates();
-            UpdateSessionAutosaveTimer();
-            SaveOpenDocumentSession(true);
-            SaveFontSettings();
-            g_sessionDirty = false;
-            break;
-        case IDM_VIEW_STARTUP_RESUMESAVED:
-            g_state.startupBehavior = StartupBehavior::ResumeSaved;
-            UpdateRuntimeMenuStates();
-            UpdateSessionAutosaveTimer();
-            SaveOpenDocumentSession(true);
-            SaveFontSettings();
-            g_sessionDirty = false;
-            break;
-        case IDM_VIEW_BG_SELECT:
-            ViewSelectBackground();
-            break;
-        case IDM_VIEW_BG_CLEAR:
-            ViewClearBackground();
-            break;
-        case IDM_VIEW_BG_OPACITY:
-            ViewBackgroundOpacity();
-            break;
-        case IDM_VIEW_BG_POS_TOPLEFT:
-            SetBackgroundPosition(BgPosition::TopLeft);
-            break;
-        case IDM_VIEW_BG_POS_TOPCENTER:
-            SetBackgroundPosition(BgPosition::TopCenter);
-            break;
-        case IDM_VIEW_BG_POS_TOPRIGHT:
-            SetBackgroundPosition(BgPosition::TopRight);
-            break;
-        case IDM_VIEW_BG_POS_CENTERLEFT:
-            SetBackgroundPosition(BgPosition::CenterLeft);
-            break;
-        case IDM_VIEW_BG_POS_CENTER:
-            SetBackgroundPosition(BgPosition::Center);
-            break;
-        case IDM_VIEW_BG_POS_CENTERRIGHT:
-            SetBackgroundPosition(BgPosition::CenterRight);
-            break;
-        case IDM_VIEW_BG_POS_BOTTOMLEFT:
-            SetBackgroundPosition(BgPosition::BottomLeft);
-            break;
-        case IDM_VIEW_BG_POS_BOTTOMCENTER:
-            SetBackgroundPosition(BgPosition::BottomCenter);
-            break;
-        case IDM_VIEW_BG_POS_BOTTOMRIGHT:
-            SetBackgroundPosition(BgPosition::BottomRight);
-            break;
-        case IDM_VIEW_BG_POS_TILE:
-            SetBackgroundPosition(BgPosition::Tile);
-            break;
-        case IDM_VIEW_BG_POS_STRETCH:
-            SetBackgroundPosition(BgPosition::Stretch);
-            break;
-        case IDM_VIEW_BG_POS_FIT:
-            SetBackgroundPosition(BgPosition::Fit);
-            break;
-        case IDM_VIEW_BG_POS_FILL:
-            SetBackgroundPosition(BgPosition::Fill);
-            break;
-        case IDM_VIEW_LANG_EN:
-            if (g_hwndFindDlg)
-            {
-                DestroyWindow(g_hwndFindDlg);
-                g_hwndFindDlg = nullptr;
-            }
-            SetLanguage(LangID::EN);
-            UpdateMenuStrings();
-            UpdateRecentFilesMenu();
-            UpdateLanguageMenu();
-            RefreshAllDocumentTabLabels();
-            UpdateTitle();
-            UpdateStatus();
-            UpdateRuntimeMenuStates();
-            break;
-        case IDM_VIEW_LANG_JA:
-            if (g_hwndFindDlg)
-            {
-                DestroyWindow(g_hwndFindDlg);
-                g_hwndFindDlg = nullptr;
-            }
-            SetLanguage(LangID::JA);
-            UpdateMenuStrings();
-            UpdateRecentFilesMenu();
-            UpdateLanguageMenu();
-            RefreshAllDocumentTabLabels();
-            UpdateTitle();
-            UpdateStatus();
-            UpdateRuntimeMenuStates();
-            break;
-        case IDM_VIEW_ICON_CHANGE:
-            ViewChangeIcon();
-            break;
-        case IDM_VIEW_ICON_SYSTEM:
-            ViewChooseSystemIcon();
-            break;
-        case IDM_VIEW_ICON_RESET:
-            ViewResetIcon();
-            break;
-        case IDM_HELP_CHECKUPDATES:
-            HelpCheckUpdates();
-            break;
-        case IDM_HELP_PERF_BENCHMARK:
-            HelpRunPerformanceBenchmark();
-            break;
-        case IDM_HELP_ABOUT:
-            HelpAbout();
             break;
         }
         SyncDocumentFromState(g_activeDocument, false);
-        MarkSessionDirty();
+        const bool sessionStateChanged =
+            (g_documents.size() != preDocumentCount) ||
+            (g_activeDocument != preActiveDocument) ||
+            (g_state.filePath != preFilePath) ||
+            (g_state.modified != preModified) ||
+            (g_state.encoding != preEncoding) ||
+            (g_state.lineEnding != preLineEnding) ||
+            (g_state.largeFileMode != preLargeFileMode) ||
+            (g_state.largeFileBytes != preLargeFileBytes);
+        if (sessionStateChanged && !g_state.closing)
+            MarkSessionDirty();
         return 0;
     }
     case WM_NOTIFY:
@@ -2421,8 +1851,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             const auto &lang = GetLangStrings();
             AppendMenuW(hPopup, MF_STRING, IDM_FILE_NEW, MenuLabelForContext(lang.menuNew).c_str());
-            AppendMenuW(hPopup, MF_STRING, IDM_FILE_CLOSETAB, L"Close Tab");
-            AppendMenuW(hPopup, MF_STRING, IDM_FILE_REOPENCLOSEDTAB, L"Reopen Closed Tab");
+            AppendMenuW(hPopup, MF_STRING, IDM_FILE_CLOSETAB, lang.menuCloseTab.c_str());
+            AppendMenuW(hPopup, MF_STRING, IDM_FILE_REOPENCLOSEDTAB, lang.menuReopenClosedTab.c_str());
             if (g_documents.size() <= 1)
                 EnableMenuItem(hPopup, IDM_FILE_CLOSETAB, MF_BYCOMMAND | MF_GRAYED);
             if (g_closedDocuments.empty())
@@ -2523,6 +1953,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             delete g_bgImage;
             g_bgImage = nullptr;
         }
+        ShutdownBackgroundGraphics();
         if (g_bgBitmap)
         {
             DeleteObject(g_bgBitmap);
@@ -2558,7 +1989,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             FreeLibrary(g_hRichEditModule);
             g_hRichEditModule = nullptr;
         }
-        DestroyTabFonts();
+        TabDestroyFonts();
         PostQuitMessage(0);
         return 0;
     }
@@ -2579,6 +2010,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
 {
+    InitializeCrashDiagnostics();
+    CrashDiagnosticsLog(L"wWinMain started");
     InitLanguage();
     typedef BOOL(WINAPI * fnSetProcessDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
     HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
@@ -2633,8 +2066,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
     wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_NOTEPAD));
     RegisterClassExW(&wc);
 
-    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-    Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, nullptr);
     INITCOMMONCONTROLSEX icc = {sizeof(icc), ICC_BAR_CLASSES};
     InitCommonControlsEx(&icc);
 
@@ -2643,6 +2074,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
     g_hwndMain = CreateWindowExW(0, L"NotepadClass", initialTitle.c_str(),
                                  WS_OVERLAPPEDWINDOW | WS_MAXIMIZEBOX, g_state.windowX, g_state.windowY, g_state.windowWidth, g_state.windowHeight,
                                  nullptr, nullptr, hInstance, nullptr);
+    CrashDiagnosticsLog(L"Main window created");
     g_hAccel = LoadAcceleratorsW(hInstance, MAKEINTRESOURCEW(IDR_ACCEL));
     int showCmd = benchmarkOnly ? SW_HIDE : nCmdShow;
     if (!benchmarkOnly && g_state.windowMaximized && (nCmdShow == SW_SHOW || nCmdShow == SW_SHOWNORMAL || nCmdShow == SW_SHOWDEFAULT))
@@ -2655,7 +2087,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
         bool allPassed = false;
         bool allExecuted = false;
         const bool ok = RunPerformanceBenchmark(false, nullptr, &allPassed, &allExecuted);
-        Gdiplus::GdiplusShutdown(g_gdiplusToken);
+        CrashDiagnosticsLog(ok ? L"Benchmark mode exit success" : L"Benchmark mode exit failure");
+        ShutdownBackgroundGraphics();
         return ok ? 0 : 1;
     }
 
@@ -2693,6 +2126,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
         }
     }
 
-    Gdiplus::GdiplusShutdown(g_gdiplusToken);
+    CrashDiagnosticsLog(L"Application message loop exited");
+    ShutdownBackgroundGraphics();
     return static_cast<int>(msg.wParam);
 }

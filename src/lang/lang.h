@@ -23,6 +23,8 @@ struct LangStrings
     std::wstring menuPageSetup;
     std::wstring menuExit;
     std::wstring menuRecentFiles;
+    std::wstring menuCloseTab;
+    std::wstring menuReopenClosedTab;
 
     std::wstring menuEdit;
     std::wstring menuUndo;
@@ -93,6 +95,12 @@ struct LangStrings
     std::wstring dialogOK;
     std::wstring dialogCancel;
     std::wstring dialogOpacityLabel;
+    std::wstring dialogBgOpacity;
+    std::wstring dialogBgOpacityLabel;
+    std::wstring filterTextDocuments;
+    std::wstring filterIconFiles;
+    std::wstring filterImageFiles;
+    std::wstring filterAllFiles;
 
     std::wstring msgCannotFind;
     std::wstring msgSaveChanges;
@@ -100,6 +108,27 @@ struct LangStrings
     std::wstring msgCannotSaveFile;
     std::wstring msgError;
     std::wstring msgAbout;
+    std::wstring msgCannotLoadRichEdit;
+    std::wstring msgDisableTabsCloseOthers;
+    std::wstring msgLineNumberOutOfRange;
+    std::wstring msgFileTooLargeOpen;
+    std::wstring msgFileTooLargeSave;
+    std::wstring msgIconLoadFailed;
+    std::wstring msgUpdateCheckFailed;
+    std::wstring msgUpdateParseVersionFailed;
+    std::wstring msgUpdateAvailable;
+    std::wstring msgCurrentVersion;
+    std::wstring msgLatestVersion;
+    std::wstring msgOpenDownloadPage;
+    std::wstring msgUpToDate;
+    std::wstring msgBenchmarkCompletedPass;
+    std::wstring msgBenchmarkCompletedWarn;
+    std::wstring msgBenchmarkWarnExceededBudget;
+    std::wstring msgBenchmarkCompletedFail;
+    std::wstring msgBenchmarkFailCaseNotRun;
+    std::wstring msgBenchmarkReportSavedTo;
+    std::wstring msgBenchmarkOpenReportNow;
+    std::wstring msgBenchmarkReportSaveFailed;
 
     std::wstring statusLn;
     std::wstring statusCol;

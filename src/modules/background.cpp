@@ -6,10 +6,12 @@
 */
 
 #include "background.h"
+#include "core/file_dialog_filters.h"
 #include "core/globals.h"
 #include "theme.h"
 #include "resource.h"
 #include "settings.h"
+#include "lang/lang.h"
 #include <commdlg.h>
 #include <algorithm>
 
@@ -27,6 +29,24 @@ int ScaleBackgroundPx(int px)
 }
 }
 
+bool EnsureBackgroundGraphicsReady()
+{
+    if (g_gdiplusToken != 0)
+        return true;
+
+    Gdiplus::GdiplusStartupInput startupInput{};
+    const Gdiplus::Status status = Gdiplus::GdiplusStartup(&g_gdiplusToken, &startupInput, nullptr);
+    return status == Gdiplus::Ok && g_gdiplusToken != 0;
+}
+
+void ShutdownBackgroundGraphics()
+{
+    if (g_gdiplusToken == 0)
+        return;
+    Gdiplus::GdiplusShutdown(g_gdiplusToken);
+    g_gdiplusToken = 0;
+}
+
 void LoadBackgroundImage(const std::wstring &path)
 {
     if (g_bgImage)
@@ -34,6 +54,16 @@ void LoadBackgroundImage(const std::wstring &path)
         delete g_bgImage;
         g_bgImage = nullptr;
     }
+
+    if (!EnsureBackgroundGraphicsReady())
+    {
+        g_state.background.imagePath = path;
+        g_state.background.enabled = false;
+        SaveFontSettings();
+        InvalidateRect(g_hwndEditor, nullptr, TRUE);
+        return;
+    }
+
     g_bgImage = Gdiplus::Image::FromFile(path.c_str());
     if (g_bgImage && g_bgImage->GetLastStatus() != Gdiplus::Ok)
     {
@@ -145,25 +175,60 @@ void UpdateBackgroundBitmap(HWND hwnd)
         return;
     if (g_bgBitmap && g_bgBitmapW == w && g_bgBitmapH == h)
         return;
-    if (g_bgBitmap)
-    {
-        DeleteObject(g_bgBitmap);
-        g_bgBitmap = nullptr;
-    }
+
     HDC hdcScreen = GetDC(hwnd);
+    if (!hdcScreen)
+        return;
+
     HDC hdcMem = CreateCompatibleDC(hdcScreen);
-    g_bgBitmap = CreateCompatibleBitmap(hdcScreen, w, h);
-    g_bgBitmapW = w;
-    g_bgBitmapH = h;
-    HBITMAP hOldBmp = reinterpret_cast<HBITMAP>(SelectObject(hdcMem, g_bgBitmap));
+    if (!hdcMem)
+    {
+        ReleaseDC(hwnd, hdcScreen);
+        return;
+    }
+
+    HBITMAP newBitmap = CreateCompatibleBitmap(hdcScreen, w, h);
+    if (!newBitmap)
+    {
+        DeleteDC(hdcMem);
+        ReleaseDC(hwnd, hdcScreen);
+        return;
+    }
+
+    HBITMAP hOldBmp = reinterpret_cast<HBITMAP>(SelectObject(hdcMem, newBitmap));
+    if (!hOldBmp || reinterpret_cast<HGDIOBJ>(hOldBmp) == HGDI_ERROR)
+    {
+        DeleteObject(newBitmap);
+        DeleteDC(hdcMem);
+        ReleaseDC(hwnd, hdcScreen);
+        return;
+    }
+
     COLORREF bgColor = IsDarkMode() ? RGB(30, 30, 30) : GetSysColor(COLOR_WINDOW);
     HBRUSH hBrush = CreateSolidBrush(bgColor);
+    if (!hBrush)
+    {
+        SelectObject(hdcMem, hOldBmp);
+        DeleteObject(newBitmap);
+        DeleteDC(hdcMem);
+        ReleaseDC(hwnd, hdcScreen);
+        return;
+    }
     FillRect(hdcMem, &rc, hBrush);
     DeleteObject(hBrush);
     PaintBackground(hdcMem, rc);
     SelectObject(hdcMem, hOldBmp);
     DeleteDC(hdcMem);
     ReleaseDC(hwnd, hdcScreen);
+
+    if (g_bgBitmap)
+    {
+        DeleteObject(g_bgBitmap);
+        g_bgBitmap = nullptr;
+    }
+    g_bgBitmap = newBitmap;
+    g_bgBitmapW = w;
+    g_bgBitmapH = h;
 }
 
 void SetBackgroundPosition(BgPosition pos)
@@ -252,11 +317,13 @@ void SetBackgroundPosition(BgPosition pos)
 
 void ViewSelectBackground()
 {
+    const auto &lang = GetLangStrings();
+    const std::wstring filter = BuildImageFilesFilter(lang);
     wchar_t path[MAX_PATH] = {0};
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = g_hwndMain;
-    ofn.lpstrFilter = L"Image Files (*.png;*.jpg;*.jpeg;*.bmp;*.gif)\0*.png;*.jpg;*.jpeg;*.bmp;*.gif\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter = filter.c_str();
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
@@ -278,6 +345,7 @@ void ViewClearBackground()
     }
     g_state.background.enabled = false;
     g_state.background.imagePath.clear();
+    ShutdownBackgroundGraphics();
     SaveFontSettings();
     InvalidateRect(g_hwndEditor, nullptr, TRUE);
 }
@@ -289,6 +357,7 @@ static INT_PTR CALLBACK OpacityDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARA
     {
     case WM_INITDIALOG:
     {
+        const auto &lang = GetLangStrings();
         const int margin = ScaleBackgroundPx(16);
         const int gap = ScaleBackgroundPx(12);
         const int labelW = ScaleBackgroundPx(110);
@@ -311,12 +380,12 @@ static INT_PTR CALLBACK OpacityDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARA
         const int okX = cancelX - buttonGap - buttonW;
 
         HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        CreateWindowExW(0, L"STATIC", L"Opacity (0-100%):", WS_CHILD | WS_VISIBLE, margin, labelY, labelW, labelH, hDlg, nullptr, nullptr, nullptr);
+        CreateWindowExW(0, L"STATIC", lang.dialogBgOpacityLabel.c_str(), WS_CHILD | WS_VISIBLE, margin, labelY, labelW, labelH, hDlg, nullptr, nullptr, nullptr);
         hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_RIGHT | ES_AUTOHSCROLL,
                                 inputX, rowY, inputW, inputH, hDlg, reinterpret_cast<HMENU>(1001), nullptr, nullptr);
-        CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+        CreateWindowExW(0, L"BUTTON", lang.dialogOK.c_str(), WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                         okX, buttonY, buttonW, buttonH, hDlg, reinterpret_cast<HMENU>(IDOK), nullptr, nullptr);
-        CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE,
+        CreateWindowExW(0, L"BUTTON", lang.dialogCancel.c_str(), WS_CHILD | WS_VISIBLE,
                         cancelX, buttonY, buttonW, buttonH, hDlg, reinterpret_cast<HMENU>(IDCANCEL), nullptr, nullptr);
         for (HWND h = GetWindow(hDlg, GW_CHILD); h; h = GetWindow(h, GW_HWNDNEXT))
             SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), TRUE);
@@ -356,6 +425,7 @@ static INT_PTR CALLBACK OpacityDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARA
 
 void ViewBackgroundOpacity()
 {
+    const auto &lang = GetLangStrings();
     const DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE;
     const DWORD exStyle = WS_EX_DLGMODALFRAME;
 
@@ -387,7 +457,7 @@ void ViewBackgroundOpacity()
         y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - windowH) / 2;
     }
 
-    HWND hDlg = CreateWindowExW(exStyle, L"#32770", L"Background Opacity",
+    HWND hDlg = CreateWindowExW(exStyle, L"#32770", lang.dialogBgOpacity.c_str(),
                                 style, x, y, windowW, windowH,
                                 g_hwndMain, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!hDlg)

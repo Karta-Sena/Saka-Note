@@ -358,7 +358,7 @@ INT_PTR CALLBACK GotoDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
                 else
                 {
                     const auto &lang = GetLangStrings();
-                    MessageBoxW(hDlg, L"The line number is beyond the total number of lines.", (lang.appName + L" - " + lang.dialogGoTo).c_str(), MB_OK | MB_ICONWARNING);
+                    MessageBoxW(hDlg, lang.msgLineNumberOutOfRange.c_str(), (lang.appName + L" - " + lang.dialogGoTo).c_str(), MB_OK | MB_ICONWARNING);
                 }
             }
             return TRUE;
