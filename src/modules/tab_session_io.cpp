@@ -45,6 +45,8 @@ bool SessionReadTabDocumentRecord(HANDLE hFile, DocumentTabState &doc, DWORD max
     doc.lineEnding = payload.lineEnding;
     doc.filePath = payload.filePath;
     doc.text = payload.text;
+    doc.richText.clear();
+    doc.hasRichText = false;
 
     doc.needsReloadFromDisk = false;
     if (!doc.modified && doc.text.empty() && !doc.filePath.empty())
@@ -89,6 +91,8 @@ bool SessionLoadDocumentTextFromDisk(DocumentTabState &doc)
 
     const auto detected = DetectEncoding(data);
     doc.text = DecodeText(data, detected.first);
+    doc.richText.clear();
+    doc.hasRichText = false;
     doc.encoding = detected.first;
     doc.lineEnding = detected.second;
     doc.sourceBytes = static_cast<size_t>(size);
@@ -117,7 +121,7 @@ std::wstring SessionRuntimeFilePath()
         dirPath = modulePath;
     }
 
-    dirPath += L"\\SakaNote";
+    dirPath += L"\\TechnicalStandardNote";
     CreateDirectoryW(dirPath.c_str(), nullptr);
     return dirPath + L"\\session.dat";
 }
@@ -287,3 +291,4 @@ bool SessionReadSnapshot(const std::wstring &sessionFilePath,
     outSnapshot.activeDocument = (activeDocIndex < outSnapshot.documents.size()) ? static_cast<int>(activeDocIndex) : 0;
     return true;
 }
+

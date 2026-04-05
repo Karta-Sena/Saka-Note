@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <vector>
 
-#define SETTINGS_KEY L"Software\\SakaNote"
+#define SETTINGS_KEY L"Software\\TechnicalStandardNote"
 #define LEGACY_SETTINGS_KEY L"Software\\LegacyNotepad"
 #define FONT_NAME_VALUE L"FontName"
 #define FONT_SIZE_VALUE L"FontSize"
@@ -331,3 +331,4 @@ void LoadOpenTabsSession(std::vector<std::wstring> &tabPaths, int &activeTabInde
 
     RegCloseKey(hKey);
 }
+

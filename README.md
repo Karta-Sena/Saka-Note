@@ -1,11 +1,11 @@
-# Saka Note
+# Technical Standard Note
 
 <p align="left">
-  <img src="src/Saka%20Note%20Icon.png" alt="Saka Note icon" width="96">
+  <img src="assets/branding/technical-standard-note-icon.png" alt="Technical Standard Note icon" width="96">
 </p>
 
-Saka Note is a lightweight Windows text editor built with C++17 and Win32 API.  
-Saka Note adalah editor teks Windows ringan yang dibangun dengan C++17 dan Win32 API.
+Technical Standard Note is a lightweight Windows text editor built with C++17 and Win32 API.  
+Technical Standard Note adalah editor teks Windows ringan yang dibangun dengan C++17 dan Win32 API.
 
 Project goal: keep plain-text editing fast, stable, and clean without feature bloat.  
 Tujuan proyek: menjaga pengeditan plain text tetap cepat, stabil, dan bersih tanpa feature bloat.
@@ -60,21 +60,97 @@ Detail atribusi dan log modifikasi:
 
 ## Build
 
-### MinGW (Debug)
+### Quick Start (VS Code)
+
+1. `Ctrl+Shift+P` -> `CMake: Select Configure Preset` -> pilih `MinGW Debug`.
+2. `Ctrl+Shift+P` -> `CMake: Configure`.
+3. `Ctrl+Shift+P` -> `CMake: Build`.
+
+If compiler path becomes stale, run:
+- `Ctrl+Shift+P` -> `CMake: Delete Cache and Reconfigure`.
+
+### Quick Start (CLI, 3 commands)
 
 ```powershell
-cmake -S . -B build/mingw-debug -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/mingw-debug
-.\build\mingw-debug\saka-note.exe
+cmake --preset mingw-debug --fresh
+cmake --build --preset mingw-debug
+ctest --preset mingw-debug
 ```
 
-### MSVC (Debug)
+### Alternative (Auto-detect generator/toolchain)
+
+Use **Developer PowerShell for Visual Studio** (2026/2022) or shell with MinGW toolchain in `PATH`.
 
 ```powershell
-cmake -S . -B build/msvc-debug -G "Visual Studio 17 2022" -A x64
-cmake --build build/msvc-debug --config Debug
-.\build\msvc-debug\Debug\saka-note.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\dev-build.ps1 -Config Debug -RunTests
 ```
+
+The script tries generators in this order:
+- `Visual Studio 18 2026`
+- `Visual Studio 17 2022`
+- `NMake Makefiles`
+- `Ninja Multi-Config`
+- `Ninja`
+- `MinGW Makefiles`
+
+If you see `could not find any instance of Visual Studio`, use:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\dev-build.ps1 -ForceNMake -Config Debug -RunTests
+```
+
+### Manual MSVC (Visual Studio 2026)
+
+```powershell
+cmake -S . -B build/vs2026-debug --fresh -G "Visual Studio 18 2026" -A x64
+cmake --build build/vs2026-debug --config Debug
+.\build\vs2026-debug\Debug\technical-standard-note.exe
+```
+
+### Manual MSVC (Build Tools / Developer PowerShell fallback via NMake)
+
+```powershell
+cmake -S . -B build/nmake-debug --fresh -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/nmake-debug
+.\build\nmake-debug\technical-standard-note.exe
+```
+
+## Test
+
+### Unit/Logic tests via script (recommended)
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\dev-build.ps1 -Config Debug -RunTests
+```
+
+### Unit/Logic tests via CTest (Visual Studio 2026)
+
+```powershell
+cmake -S . -B build/vs2026-debug --fresh -G "Visual Studio 18 2026" -A x64
+cmake --build build/vs2026-debug --config Debug
+ctest --test-dir build/vs2026-debug -C Debug --output-on-failure
+```
+
+### Unit/Logic tests via CTest (NMake)
+
+```powershell
+cmake -S . -B build/nmake-debug --fresh -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/nmake-debug
+ctest --test-dir build/nmake-debug --output-on-failure
+```
+
+### Manual smoke test checklist
+
+1. Flicker test:
+   - enable background image,
+   - type continuously for 20-30 seconds,
+   - verify editor and tab strip do not blink aggressively.
+2. Auto-list test:
+   - type `1. item` then press Enter -> next line should start `2. `,
+   - type `- item` then press Enter -> next line should start `- `,
+   - on an empty list line (`2. ` or `- `), press Enter -> list marker should be removed (exit list mode).
+3. Standard editing regression:
+   - undo/redo, copy/paste, Ctrl+Backspace, Ctrl+Delete, save/open.
 
 ## Distribution / Distribusi
 
@@ -101,12 +177,12 @@ Setelah repo kamu terhubung ke GitHub:
    - `git push origin v1.3.0`
 2. Wait for `Build and Release` GitHub Actions workflow to finish.
 3. Buka halaman `Releases` dan unduh salah satu file:
-   - `saka-note-setup-x64.exe` (recommended for most users; creates Start Menu entry)
-   - `saka-note-portable-x64.zip` (portable; no install required)
-   - `saka-note-setup-ARM64.exe` / `saka-note-portable-ARM64.zip` (ARM devices)
+   - `technical-standard-note-setup-x64.exe` (recommended for most users; creates Start Menu entry)
+   - `technical-standard-note-portable-x64.zip` (portable; no install required)
+   - `technical-standard-note-setup-ARM64.exe` / `technical-standard-note-portable-ARM64.zip` (ARM devices)
 4. For portable zip:
    - extract zip,
-   - run `saka-note.exe`.
+   - run `technical-standard-note.exe`.
 
 For a one-week trial, keep a simple checklist:  
 Untuk uji coba satu minggu, simpan checklist sederhana:
@@ -121,13 +197,13 @@ Untuk uji coba satu minggu, simpan checklist sederhana:
 Internal benchmark / Benchmark internal:
 
 ```powershell
-.\build\mingw-debug\saka-note.exe --benchmark-ci
+.\build\mingw-debug\technical-standard-note.exe --benchmark-ci
 ```
 
 Report output / Lokasi output laporan:
-- `%LOCALAPPDATA%\SakaNote\benchmarks\benchmark-YYYYMMDD-HHMMSS.txt`
+- `%LOCALAPPDATA%\TechnicalStandardNote\benchmarks\benchmark-YYYYMMDD-HHMMSS.txt`
 
-A/B benchmark (Saka Note vs Microsoft Notepad):
+A/B benchmark (Technical Standard Note vs Microsoft Notepad):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\compare-notepad.ps1 -Iterations 3 -SampleSeconds 8 -SampleIntervalMs 500 -WarmupMs 3000 -ForceCloseBeforeEachRun
@@ -163,4 +239,5 @@ research/ (generated benchmark outputs; gitignored)
 
 MIT License. See `LICENSE`.  
 Lisensi MIT. Lihat `LICENSE`.
+
 

@@ -26,7 +26,40 @@
 
 namespace
 {
-#if !defined(SAKA_NOTE_SPLIT_COMMAND_MODULES)
+bool SelectionEffectActive(DWORD effectMask, DWORD effectFlag)
+{
+    CHARFORMAT2W current{};
+    current.cbSize = sizeof(current);
+    SendMessageW(g_hwndEditor, EM_GETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&current));
+    if ((current.dwMask & effectMask) == 0)
+        return false;
+    return (current.dwEffects & effectFlag) != 0;
+}
+
+void ToggleSelectionEffect(DWORD effectMask, DWORD effectFlag)
+{
+    if (!g_hwndEditor || g_state.largeFileMode)
+        return;
+
+    DWORD selectionStart = 0;
+    DWORD selectionEnd = 0;
+    SendMessageW(g_hwndEditor, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart), reinterpret_cast<LPARAM>(&selectionEnd));
+    const bool hasSelection = selectionStart != selectionEnd;
+
+    CHARFORMAT2W apply{};
+    apply.cbSize = sizeof(apply);
+    apply.dwMask = effectMask;
+    apply.dwEffects = SelectionEffectActive(effectMask, effectFlag) ? 0 : effectFlag;
+    const LRESULT ok = SendMessageW(g_hwndEditor, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&apply));
+    if (ok != 0 && hasSelection && !g_state.modified)
+    {
+        g_state.modified = true;
+        UpdateTitle();
+    }
+    SetFocus(g_hwndEditor);
+}
+
+#if !defined(TECHNICAL_STANDARD_NOTE_SPLIT_COMMAND_MODULES)
 using fnPickIconDlg = BOOL(WINAPI *)(HWND, LPWSTR, UINT, int *);
 
 bool IsIconResourceContainer(const std::wstring &path)
@@ -165,7 +198,7 @@ std::wstring BenchmarkDirectoryPath()
             root = L".";
     }
 
-    root += L"\\SakaNote";
+    root += L"\\TechnicalStandardNote";
     CreateDirectoryW(root.c_str(), nullptr);
     root += L"\\benchmarks";
     CreateDirectoryW(root.c_str(), nullptr);
@@ -190,7 +223,7 @@ bool CreateBenchmarkFile(const std::wstring &path, size_t targetBytes)
         return false;
 
     static constexpr char kLine[] =
-        "SakaNote benchmark line 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ.\r\n";
+        "TechnicalStandardNote benchmark line 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ.\r\n";
     const DWORD lineBytes = static_cast<DWORD>(sizeof(kLine) - 1);
     size_t writtenTotal = 0;
     bool ok = true;
@@ -241,7 +274,7 @@ bool SetBenchmarkEditorText(HWND hwnd, const std::wstring &text)
 
 std::wstring BuildScrollBenchmarkText(size_t lines)
 {
-    static constexpr wchar_t kLine[] = L"SakaNote scroll benchmark line 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
+    static constexpr wchar_t kLine[] = L"TechnicalStandardNote scroll benchmark line 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
     static constexpr size_t kLineChars = (sizeof(kLine) / sizeof(wchar_t)) - 1;
     std::wstring text;
     text.reserve(lines * kLineChars);
@@ -320,7 +353,7 @@ bool RunTypingBurstBenchmark(const std::wstring &label, double budgetMs, PerfBen
     if (!hwnd)
         return false;
 
-    static constexpr wchar_t kChunk[] = L"saka-note typing burst 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
+    static constexpr wchar_t kChunk[] = L"technical-standard-note typing burst 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
     static constexpr size_t kChunkChars = (sizeof(kChunk) / sizeof(wchar_t)) - 1;
     static constexpr int kIterations = 1200;
 
@@ -394,7 +427,7 @@ bool RunScrollStressBenchmark(const std::wstring &label, double budgetMs, PerfBe
 std::wstring FormatBenchmarkReport(const std::vector<PerfBenchmarkResult> &results)
 {
     std::wostringstream ss;
-    ss << L"Saka Note Performance Benchmark\n";
+    ss << L"Technical Standard Note Performance Benchmark\n";
     ss << L"Scope: open pipeline + typing burst + scroll stress\n";
     ss << L"Hardware dependent. Use this for regression tracking.\n\n";
 
@@ -677,6 +710,21 @@ void FormatWordWrap()
     SaveFontSettings();
 }
 
+void FormatBold()
+{
+    ToggleSelectionEffect(CFM_BOLD, CFE_BOLD);
+}
+
+void FormatItalic()
+{
+    ToggleSelectionEffect(CFM_ITALIC, CFE_ITALIC);
+}
+
+void FormatStrikethrough()
+{
+    ToggleSelectionEffect(CFM_STRIKEOUT, CFE_STRIKEOUT);
+}
+
 void ViewZoomIn()
 {
     static const int levels[] = {25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 350, 400, 450, 500};
@@ -726,7 +774,7 @@ void ViewStatusBar()
     SaveFontSettings();
 }
 
-#if !defined(SAKA_NOTE_SPLIT_COMMAND_MODULES)
+#if !defined(TECHNICAL_STANDARD_NOTE_SPLIT_COMMAND_MODULES)
 void ViewChangeIcon()
 {
     const auto &lang = GetLangStrings();
@@ -943,3 +991,4 @@ void ViewAlwaysOnTop()
     SetWindowPos(g_hwndMain, g_state.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     SaveFontSettings();
 }
+

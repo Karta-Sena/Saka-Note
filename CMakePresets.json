@@ -1,0 +1,58 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 16,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "mingw-debug",
+      "displayName": "MinGW Debug",
+      "description": "MinGW Makefiles with Scoop MinGW toolchain (Debug)",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "C:/Users/farha/scoop/apps/mingw/current/bin/g++.exe"
+      }
+    },
+    {
+      "name": "mingw-release",
+      "displayName": "MinGW Release",
+      "description": "MinGW Makefiles with Scoop MinGW toolchain (Release)",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "C:/Users/farha/scoop/apps/mingw/current/bin/g++.exe"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "mingw-debug",
+      "configurePreset": "mingw-debug"
+    },
+    {
+      "name": "mingw-release",
+      "configurePreset": "mingw-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "mingw-debug",
+      "configurePreset": "mingw-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "mingw-release",
+      "configurePreset": "mingw-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

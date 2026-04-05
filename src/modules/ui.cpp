@@ -14,6 +14,11 @@
 #include <shlwapi.h>
 #include <algorithm>
 
+static void CommitStatusPartText(int partIndex, const std::wstring &text)
+{
+    SendMessageW(g_hwndStatus, SB_SETTEXTW, partIndex | SBT_NOBORDERS, reinterpret_cast<LPARAM>(text.c_str()));
+}
+
 static int ScaleMainPx(int px)
 {
     HWND dpiSource = g_hwndMain ? g_hwndMain : g_hwndStatus;
@@ -51,57 +56,92 @@ void UpdateStatus()
     const auto &lang = GetLangStrings();
     wchar_t buf[256];
     swprintf(buf, sizeof(buf) / sizeof(wchar_t), L"%s%d%s%d ", lang.statusLn.c_str(), line, lang.statusCol.c_str(), col);
-    g_statusTexts[0] = buf;
+    std::wstring nextStatusTexts[4];
+    nextStatusTexts[0] = buf;
     if (g_state.largeFileMode)
-        g_statusTexts[0] += lang.statusLargeFile;
-    g_statusTexts[1] = GetEncodingName(g_state.encoding);
-    g_statusTexts[2] = GetLineEndingName(g_state.lineEnding);
+        nextStatusTexts[0] += lang.statusLargeFile;
+    nextStatusTexts[1] = GetEncodingName(g_state.encoding);
+    nextStatusTexts[2] = GetLineEndingName(g_state.lineEnding);
     wsprintfW(buf, L" %d%% ", g_state.zoomLevel);
-    g_statusTexts[3] = buf;
+    nextStatusTexts[3] = buf;
+
     for (int i = 0; i < 4; i++)
-        SendMessageW(g_hwndStatus, SB_SETTEXTW, i | SBT_NOBORDERS, reinterpret_cast<LPARAM>(g_statusTexts[i].c_str()));
-    InvalidateRect(g_hwndStatus, nullptr, TRUE);
+    {
+        if (nextStatusTexts[i] == g_statusTexts[i])
+            continue;
+        g_statusTexts[i] = std::move(nextStatusTexts[i]);
+        CommitStatusPartText(i, g_statusTexts[i]);
+    }
 }
 
 void SetupStatusBarParts()
 {
     RECT rc;
     GetClientRect(g_hwndMain, &rc);
+    const auto &lang = GetLangStrings();
     HDC hdc = GetDC(g_hwndStatus);
     HFONT hFont = reinterpret_cast<HFONT>(SendMessageW(g_hwndStatus, WM_GETFONT, 0, 0));
     HFONT old = reinterpret_cast<HFONT>(SelectObject(hdc, hFont ? hFont : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT))));
-    auto textW = [&](const wchar_t *s)
+    auto textW = [&](const std::wstring &s)
     {
         SIZE sz{};
-        GetTextExtentPoint32W(hdc, s, static_cast<int>(wcslen(s)), &sz);
-        return sz.cx + 24;
+        GetTextExtentPoint32W(hdc, s.c_str(), static_cast<int>(s.size()), &sz);
+        return sz.cx + ScaleMainPx(28);
     };
-    int wZoom = textW(L" 500% ");
-    int wLE = textW(L" Windows (CRLF) ");
-    int wEnc = textW(L" UTF-8 with BOM ");
+
+    const auto padded = [](const std::wstring &text)
+    { return L" " + text + L" "; };
+
+    const int wZoom = textW(L" 500% ");
+    const int wLE = std::max({textW(padded(lang.lineEndingCRLF)),
+                              textW(padded(lang.lineEndingLF)),
+                              textW(padded(lang.lineEndingCR))});
+    const int wEnc = std::max({textW(padded(lang.encodingUTF8)),
+                               textW(padded(lang.encodingUTF8BOM)),
+                               textW(padded(lang.encodingUTF16LE)),
+                               textW(padded(lang.encodingUTF16BE)),
+                               textW(padded(lang.encodingANSI))});
     SelectObject(hdc, old);
     ReleaseDC(g_hwndStatus, hdc);
-    int w = rc.right;
-    int parts[4] = {w - (wEnc + wLE + wZoom), w - (wLE + wZoom), w - wZoom, -1};
+
+    const int w = rc.right;
+    const int right1 = std::max(0, w - (wEnc + wLE + wZoom));
+    const int right2 = std::max(right1, w - (wLE + wZoom));
+    const int right3 = std::max(right2, w - wZoom);
+    int parts[4] = {right1, right2, right3, -1};
     SendMessageW(g_hwndStatus, SB_SETPARTS, 4, reinterpret_cast<LPARAM>(parts));
+
+    // SB_SETPARTS can clear non-first panes; restore cached texts after relayout.
+    for (int i = 0; i < 4; ++i)
+        CommitStatusPartText(i, g_statusTexts[i]);
 }
 
 void ResizeControls()
 {
     RECT rc;
     GetClientRect(g_hwndMain, &rc);
+    int topOffset = 0;
+
+    if (g_hwndCommandBar)
+    {
+        const int commandBarHeight = std::max(30, ScaleMainPx(34));
+        ShowWindow(g_hwndCommandBar, SW_SHOW);
+        MoveWindow(g_hwndCommandBar, 0, 0, rc.right, commandBarHeight, TRUE);
+        topOffset += commandBarHeight;
+    }
+
     int tabsH = 0;
-    int editorTop = 0;
+    int editorTop = topOffset;
     if (g_hwndTabs && g_state.useTabs)
     {
-        tabsH = std::max(28, ScaleMainPx(32));
+        tabsH = std::max(30, ScaleMainPx(36));
         ShowWindow(g_hwndTabs, SW_SHOW);
-        MoveWindow(g_hwndTabs, 0, 0, rc.right, tabsH, TRUE);
+        MoveWindow(g_hwndTabs, 0, topOffset, rc.right, tabsH, TRUE);
 
         RECT displayRect{0, 0, rc.right, tabsH};
         // Anchor editor to tab display area so active tab can visually attach to page.
         TabCtrl_AdjustRect(g_hwndTabs, FALSE, &displayRect);
-        editorTop = std::max(0, static_cast<int>(displayRect.top) - 1);
+        editorTop = topOffset + std::max(0, static_cast<int>(displayRect.top) - 1);
     }
     else if (g_hwndTabs)
     {

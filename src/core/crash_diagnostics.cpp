@@ -36,7 +36,7 @@ std::wstring BaseDiagnosticsDir()
     {
         root = L".";
     }
-    root += L"\\SakaNote";
+    root += L"\\TechnicalStandardNote";
     CreateDirectoryW(root.c_str(), nullptr);
     return root;
 }
@@ -140,8 +140,8 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS *exceptionPointers)
 
 void InitializeCrashDiagnostics()
 {
-    g_diagEnabled = IsTruthyEnv(L"SAKA_NOTE_DIAGNOSTICS");
-    g_dumpEnabled = IsTruthyEnv(L"SAKA_NOTE_MINIDUMP");
+    g_diagEnabled = IsTruthyEnv(L"TECHNICAL_STANDARD_NOTE_DIAGNOSTICS");
+    g_dumpEnabled = IsTruthyEnv(L"TECHNICAL_STANDARD_NOTE_MINIDUMP");
     if (!g_diagEnabled && !g_dumpEnabled)
         return;
 
@@ -169,3 +169,4 @@ void CrashDiagnosticsLog(const std::wstring &message)
               st.wHour, st.wMinute, st.wSecond);
     AppendLineUtf8(g_logPath, std::wstring(ts) + message);
 }
+

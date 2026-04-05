@@ -44,6 +44,9 @@ struct LangStrings
     std::wstring menuFormat;
     std::wstring menuWordWrap;
     std::wstring menuFont;
+    std::wstring menuBold;
+    std::wstring menuItalic;
+    std::wstring menuStrikethrough;
 
     std::wstring menuView;
     std::wstring menuZoomIn;

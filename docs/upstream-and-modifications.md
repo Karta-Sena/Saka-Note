@@ -9,7 +9,7 @@
 
 ## This Project / Proyek Ini
 
-- Project name / Nama proyek: Saka Note
+- Project name / Nama proyek: Technical Standard Note
 - Maintainer / Pemelihara: Saka Studio & Engineering
 - Product direction / Arah produk: lightweight, plain-text-first Windows editor / editor Windows ringan dengan fokus teks polos
 
@@ -32,15 +32,15 @@ Codebase telah diperluas dan direorganisasi secara signifikan dari baseline upst
 - Peningkatan konsistensi UI (dialog, visual tab, dark mode polish).
 - Build/dev workflow additions (benchmark utilities, cleanup scripts, CI release artifacts).
 - Penambahan workflow build/dev (utilitas benchmark, script cleanup, artifact rilis CI).
-- Branding updates from upstream identity to Saka Note.
-- Pembaruan branding dari identitas upstream ke Saka Note.
+- Branding updates from upstream identity to Technical Standard Note.
+- Pembaruan branding dari identitas upstream ke Technical Standard Note.
 
 ## Compatibility Notes / Catatan Kompatibilitas
 
 - Some internal names and structures still preserve legacy references for migration stability.
 - Beberapa nama dan struktur internal masih menyimpan referensi legacy untuk stabilitas migrasi.
-- Registry/config/session locations are migrated toward `SakaNote` naming while keeping fallback compatibility from legacy keys.
-- Lokasi registry/config/session dimigrasikan ke nama `SakaNote` sambil menjaga kompatibilitas fallback dari key legacy.
+- Registry/config/session locations are migrated toward `TechnicalStandardNote` naming while keeping fallback compatibility from legacy keys.
+- Lokasi registry/config/session dimigrasikan ke nama `TechnicalStandardNote` sambil menjaga kompatibilitas fallback dari key legacy.
 
 ## Documentation Policy / Kebijakan Dokumentasi
 
@@ -52,3 +52,4 @@ When publishing releases, include / Saat merilis versi baru, sertakan:
 - Ringkasan perubahan pada release notes.
 - Benchmark evidence for performance claims (`comparison.md` + raw CSV outputs).
 - Bukti benchmark untuk klaim performa (`comparison.md` + output CSV mentah).
+

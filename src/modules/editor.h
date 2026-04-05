@@ -12,12 +12,15 @@
 
 std::wstring GetEditorText();
 void SetEditorText(const std::wstring &text);
+std::string GetEditorRichText();
+void SetEditorRichText(const std::string &rtf);
 std::pair<int, int> GetCursorPos();
 void ConfigureEditorControl(HWND hwnd);
 void ApplyFont();
 void ApplyZoom();
 void ApplyWordWrap();
 void ApplyEditorViewportPadding();
+void ApplyEditorScrollbarChrome();
 void DeleteWordBackward();
 void DeleteWordForward();
 LRESULT CALLBACK EditorSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);

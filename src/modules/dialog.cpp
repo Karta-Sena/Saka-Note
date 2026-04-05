@@ -103,14 +103,14 @@ INT_PTR HandleDialogCtlColor(UINT msg, WPARAM wParam)
 {
     if (!IsDarkMode())
     {
-        if (msg == WM_CTLCOLOREDIT)
+        if (msg == WM_CTLCOLOREDIT || msg == WM_CTLCOLORLISTBOX)
             return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
         return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_BTNFACE));
     }
 
     HDC hdc = reinterpret_cast<HDC>(wParam);
     SetTextColor(hdc, kDialogDarkText);
-    if (msg == WM_CTLCOLOREDIT)
+    if (msg == WM_CTLCOLOREDIT || msg == WM_CTLCOLORLISTBOX)
     {
         SetBkColor(hdc, kDialogDarkEditBg);
         SetBkMode(hdc, OPAQUE);
@@ -121,6 +121,7 @@ INT_PTR HandleDialogCtlColor(UINT msg, WPARAM wParam)
     SetBkColor(hdc, kDialogDarkBg);
     return reinterpret_cast<INT_PTR>(g_hbrDialogDark ? g_hbrDialogDark : GetStockObject(BLACK_BRUSH));
 }
+
 }
 
 void DoFind(bool forward)
@@ -428,6 +429,7 @@ void FormatFont()
         lf.lfQuality = CLEARTYPE_QUALITY;
         lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
     }
+
     CHOOSEFONTW cf{};
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = g_hwndMain;

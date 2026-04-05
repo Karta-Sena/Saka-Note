@@ -83,6 +83,15 @@ bool RouteStandardCommand(HWND hwnd, WORD cmd)
     case IDM_FORMAT_FONT:
         FormatFont();
         return true;
+    case IDM_FORMAT_BOLD:
+        FormatBold();
+        return true;
+    case IDM_FORMAT_ITALIC:
+        FormatItalic();
+        return true;
+    case IDM_FORMAT_STRIKETHROUGH:
+        FormatStrikethrough();
+        return true;
 
     case IDM_VIEW_ZOOMIN:
         ViewZoomIn();

@@ -13,6 +13,8 @@
 struct DocumentTabState
 {
     std::wstring text;
+    std::string richText;
+    bool hasRichText = false;
     std::wstring filePath;
     bool modified = false;
     Encoding encoding = Encoding::UTF8;

@@ -79,7 +79,7 @@ std::wstring BenchmarkDirectoryPath()
             root = L".";
     }
 
-    root += L"\\SakaNote";
+    root += L"\\TechnicalStandardNote";
     CreateDirectoryW(root.c_str(), nullptr);
     root += L"\\benchmarks";
     CreateDirectoryW(root.c_str(), nullptr);
@@ -104,7 +104,7 @@ bool CreateBenchmarkFile(const std::wstring &path, size_t targetBytes)
         return false;
 
     static constexpr char kLine[] =
-        "SakaNote benchmark line 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ.\r\n";
+        "TechnicalStandardNote benchmark line 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ.\r\n";
     const DWORD lineBytes = static_cast<DWORD>(sizeof(kLine) - 1);
     size_t writtenTotal = 0;
     bool ok = true;
@@ -155,7 +155,7 @@ bool SetBenchmarkEditorText(HWND hwnd, const std::wstring &text)
 
 std::wstring BuildScrollBenchmarkText(size_t lines)
 {
-    static constexpr wchar_t kLine[] = L"SakaNote scroll benchmark line 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
+    static constexpr wchar_t kLine[] = L"TechnicalStandardNote scroll benchmark line 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
     static constexpr size_t kLineChars = (sizeof(kLine) / sizeof(wchar_t)) - 1;
     std::wstring text;
     text.reserve(lines * kLineChars);
@@ -234,24 +234,26 @@ bool RunTypingBurstBenchmark(const std::wstring &label, double budgetMs, PerfBen
     if (!hwnd)
         return false;
 
-    static constexpr wchar_t kChunk[] = L"saka-note typing burst 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
+    static constexpr wchar_t kChunk[] = L"technical-standard-note typing burst 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
     static constexpr size_t kChunkChars = (sizeof(kChunk) / sizeof(wchar_t)) - 1;
     static constexpr int kIterations = 1200;
 
     LARGE_INTEGER freq{};
     QueryPerformanceFrequency(&freq);
     LARGE_INTEGER start{}, end{};
-    QueryPerformanceCounter(&start);
-
+    SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);
     SendMessageW(hwnd, EM_SETSEL, 0, -1);
     SendMessageW(hwnd, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(L""));
+    SendMessageW(hwnd, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
+
+    QueryPerformanceCounter(&start);
     for (int i = 0; i < kIterations; ++i)
     {
-        SendMessageW(hwnd, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
         SendMessageW(hwnd, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(kChunk));
     }
-
     QueryPerformanceCounter(&end);
+    SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
+
     DestroyWindow(hwnd);
 
     outResult.totalMs = ElapsedMs(start, end, freq);
@@ -288,11 +290,13 @@ bool RunScrollStressBenchmark(const std::wstring &label, double budgetMs, PerfBe
     QueryPerformanceFrequency(&freq);
     LARGE_INTEGER start{}, end{};
 
+    SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);
     SendMessageW(hwnd, EM_SETSEL, 0, 0);
     QueryPerformanceCounter(&start);
     for (int i = 0; i < kScrollOps; ++i)
         SendMessageW(hwnd, EM_LINESCROLL, 0, 1);
     QueryPerformanceCounter(&end);
+    SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
 
     DestroyWindow(hwnd);
 
@@ -308,7 +312,7 @@ bool RunScrollStressBenchmark(const std::wstring &label, double budgetMs, PerfBe
 std::wstring FormatBenchmarkReport(const std::vector<PerfBenchmarkResult> &results)
 {
     std::wostringstream ss;
-    ss << L"Saka Note Performance Benchmark\n";
+    ss << L"Technical Standard Note Performance Benchmark\n";
     ss << L"Scope: open pipeline + typing burst + scroll stress\n";
     ss << L"Hardware dependent. Use this for regression tracking.\n\n";
 
@@ -512,3 +516,4 @@ void HelpRunPerformanceBenchmark()
 {
     RunPerformanceBenchmark(true);
 }
+

@@ -13,7 +13,18 @@
 #include "background.h"
 #include "resource.h"
 #include <richedit.h>
+#include <commctrl.h>
 #include <algorithm>
+#include <cwctype>
+#include <limits>
+
+#ifndef EM_BEGINUNDOACTION
+#define EM_BEGINUNDOACTION (WM_USER + 84)
+#endif
+
+#ifndef EM_ENDUNDOACTION
+#define EM_ENDUNDOACTION (WM_USER + 85)
+#endif
 
 struct StreamCookie
 {
@@ -50,6 +61,41 @@ static DWORD CALLBACK StreamOutCallback(DWORD_PTR dwCookie, LPBYTE pbBuff, LONG 
     return 0;
 }
 
+struct StreamInAnsiCookie
+{
+    const std::string *text;
+    size_t pos;
+};
+
+static DWORD CALLBACK StreamInAnsiCallback(DWORD_PTR dwCookie, LPBYTE pbBuff, LONG cb, LONG *pcb)
+{
+    StreamInAnsiCookie *pCookie = reinterpret_cast<StreamInAnsiCookie *>(dwCookie);
+    size_t remaining = pCookie->text->size() - pCookie->pos;
+    if (remaining == 0)
+    {
+        *pcb = 0;
+        return 0;
+    }
+    size_t toCopy = (static_cast<size_t>(cb) < remaining) ? static_cast<size_t>(cb) : remaining;
+    memcpy(pbBuff, pCookie->text->data() + pCookie->pos, toCopy);
+    pCookie->pos += toCopy;
+    *pcb = static_cast<LONG>(toCopy);
+    return 0;
+}
+
+struct StreamOutAnsiCookie
+{
+    std::string *text;
+};
+
+static DWORD CALLBACK StreamOutAnsiCallback(DWORD_PTR dwCookie, LPBYTE pbBuff, LONG cb, LONG *pcb)
+{
+    StreamOutAnsiCookie *pCookie = reinterpret_cast<StreamOutAnsiCookie *>(dwCookie);
+    pCookie->text->append(reinterpret_cast<const char *>(pbBuff), static_cast<size_t>(cb));
+    *pcb = cb;
+    return 0;
+}
+
 static bool IsEditorWrapEnabled()
 {
     return g_state.wordWrap && !g_state.largeFileMode;
@@ -70,6 +116,225 @@ static int ScaleEditorPx(int px)
     return MulDiv(px, dpi > 0 ? dpi : 96, 96);
 }
 
+static void ApplyFlatScrollbarStyle(HWND hwnd)
+{
+    if (!hwnd)
+        return;
+
+    InitializeFlatSB(hwnd);
+
+    const bool dark = IsDarkMode();
+    const int barThickness = ScaleEditorPx(14);
+    const int thumbExtent = ScaleEditorPx(26);
+    const COLORREF trackColor = dark ? RGB(22, 25, 31) : RGB(236, 237, 240);
+
+    FlatSB_SetScrollProp(hwnd, WSB_PROP_VSTYLE, FSB_FLAT_MODE, FALSE);
+    FlatSB_SetScrollProp(hwnd, WSB_PROP_HSTYLE, FSB_FLAT_MODE, FALSE);
+    FlatSB_SetScrollProp(hwnd, WSB_PROP_CXVSCROLL, barThickness, FALSE);
+    FlatSB_SetScrollProp(hwnd, WSB_PROP_CYHSCROLL, barThickness, FALSE);
+    FlatSB_SetScrollProp(hwnd, WSB_PROP_CYVTHUMB, thumbExtent, FALSE);
+    FlatSB_SetScrollProp(hwnd, WSB_PROP_CXHTHUMB, thumbExtent, FALSE);
+    FlatSB_SetScrollProp(hwnd, WSB_PROP_VBKGCOLOR, trackColor, FALSE);
+    FlatSB_SetScrollProp(hwnd, WSB_PROP_HBKGCOLOR, trackColor, FALSE);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+namespace
+{
+bool g_suppressNextReturnChar = false;
+
+struct ListContinuation
+{
+    bool enabled = false;
+    std::wstring continuationPrefix;
+};
+
+bool IsListSpacingChar(wchar_t ch)
+{
+    return ch == L' ' || ch == L'\t';
+}
+
+std::wstring ContinuationSpacing(const std::wstring &body, size_t spacingStart, size_t spacingEnd)
+{
+    if (spacingEnd > spacingStart)
+        return body.substr(spacingStart, spacingEnd - spacingStart);
+    return L" ";
+}
+
+bool IsBulletMarker(wchar_t ch)
+{
+    return ch == L'-' || ch == L'*' || ch == L'+' || ch == L'\x2022';
+}
+
+bool BuildListContinuationForEnter(HWND hwnd, ListContinuation &continuation)
+{
+    DWORD selStart = 0;
+    DWORD selEnd = 0;
+    SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&selStart), reinterpret_cast<LPARAM>(&selEnd));
+    if (selStart != selEnd)
+        return false;
+
+    const LONG lineIndex = static_cast<LONG>(SendMessageW(hwnd, EM_EXLINEFROMCHAR, 0, static_cast<LPARAM>(selStart)));
+    if (lineIndex < 0)
+        return false;
+
+    const LONG lineStart = static_cast<LONG>(SendMessageW(hwnd, EM_LINEINDEX, static_cast<WPARAM>(lineIndex), 0));
+    if (lineStart < 0)
+        return false;
+
+    const LONG lineLength = static_cast<LONG>(SendMessageW(hwnd, EM_LINELENGTH, static_cast<WPARAM>(lineStart), 0));
+    if (lineLength < 0)
+        return false;
+
+    const LONG logicalLineEnd = lineStart + lineLength;
+    const LONG caretInLine = static_cast<LONG>(selStart) - lineStart;
+    const bool caretAtLineEnd = (static_cast<LONG>(selStart) == logicalLineEnd);
+
+    std::wstring lineText(static_cast<size_t>(lineLength) + 1, L'\0');
+    if (lineLength > 0)
+    {
+        TEXTRANGEW textRange{};
+        textRange.chrg.cpMin = lineStart;
+        textRange.chrg.cpMax = logicalLineEnd;
+        textRange.lpstrText = lineText.data();
+        SendMessageW(hwnd, EM_GETTEXTRANGE, 0, reinterpret_cast<LPARAM>(&textRange));
+    }
+    lineText.resize(static_cast<size_t>(lineLength));
+
+    size_t indentLength = 0;
+    while (indentLength < lineText.size() && IsListSpacingChar(lineText[indentLength]))
+        ++indentLength;
+
+    if (indentLength >= lineText.size())
+        return false;
+
+    const std::wstring body = lineText.substr(indentLength);
+    if (body.empty())
+        return false;
+
+    if (IsBulletMarker(body[0]))
+    {
+        size_t spacingStart = 1;
+        size_t spacingEnd = spacingStart;
+        while (spacingEnd < body.size() && IsListSpacingChar(body[spacingEnd]))
+            ++spacingEnd;
+        const std::wstring itemContent = body.substr(spacingEnd);
+        continuation.enabled = true;
+        if (itemContent.empty() && !caretAtLineEnd)
+            return false;
+        if (caretInLine < static_cast<LONG>(indentLength + spacingEnd))
+            return false;
+
+        continuation.continuationPrefix = lineText.substr(0, indentLength);
+        continuation.continuationPrefix.push_back(body[0]);
+        continuation.continuationPrefix += ContinuationSpacing(body, spacingStart, spacingEnd);
+        return true;
+    }
+
+    size_t digitsEnd = 0;
+    while (digitsEnd < body.size() && iswdigit(static_cast<wint_t>(body[digitsEnd])))
+        ++digitsEnd;
+    if (digitsEnd == 0 || digitsEnd >= body.size())
+        return false;
+
+    const wchar_t delimiter = body[digitsEnd];
+    if (delimiter != L'.' && delimiter != L')')
+        return false;
+
+    size_t spacingStart = digitsEnd + 1;
+    size_t spacingEnd = spacingStart;
+    while (spacingEnd < body.size() && IsListSpacingChar(body[spacingEnd]))
+        ++spacingEnd;
+
+    unsigned long long number = 0;
+    for (size_t i = 0; i < digitsEnd; ++i)
+    {
+        const unsigned long long digit = static_cast<unsigned long long>(body[i] - L'0');
+        if (number > (std::numeric_limits<unsigned long long>::max() - digit) / 10)
+            return false;
+        number = (number * 10) + digit;
+    }
+    if (number == std::numeric_limits<unsigned long long>::max())
+        return false;
+
+    const std::wstring itemContent = body.substr(spacingEnd);
+    continuation.enabled = true;
+    if (itemContent.empty() && !caretAtLineEnd)
+        return false;
+    if (caretInLine < static_cast<LONG>(indentLength + spacingEnd))
+        return false;
+
+    std::wstring nextNumberText = std::to_wstring(number + 1);
+    if (digitsEnd > nextNumberText.size() && body[0] == L'0')
+        nextNumberText.insert(0, digitsEnd - nextNumberText.size(), L'0');
+
+    continuation.continuationPrefix = lineText.substr(0, indentLength);
+    continuation.continuationPrefix.append(nextNumberText);
+    continuation.continuationPrefix.push_back(delimiter);
+    continuation.continuationPrefix += ContinuationSpacing(body, spacingStart, spacingEnd);
+    return true;
+}
+
+bool HandleAutoListEnterKeyDown(HWND hwnd, WPARAM wParam, LPARAM)
+{
+    if (wParam != VK_RETURN)
+        return false;
+    if ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000) || (GetKeyState(VK_SHIFT) & 0x8000))
+        return false;
+
+    ListContinuation continuation{};
+    if (!BuildListContinuationForEnter(hwnd, continuation) || !continuation.enabled)
+        return false;
+
+    std::wstring insertText = L"\r\n";
+    insertText += continuation.continuationPrefix;
+
+    SendMessageW(hwnd, EM_BEGINUNDOACTION, 0, 0);
+    SendMessageW(hwnd, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(insertText.c_str()));
+    SendMessageW(hwnd, EM_ENDUNDOACTION, 0, 0);
+    g_suppressNextReturnChar = true;
+    return true;
+}
+
+bool IsKeyPressed(int virtualKey)
+{
+    return (GetKeyState(virtualKey) & 0x8000) != 0;
+}
+
+bool HandleInlineFormattingShortcut(HWND hwnd, WPARAM wParam)
+{
+    if (!g_hwndMain || !IsKeyPressed(VK_CONTROL) || IsKeyPressed(VK_MENU))
+        return false;
+
+    const bool shiftPressed = IsKeyPressed(VK_SHIFT);
+    WORD commandId = 0;
+    switch (wParam)
+    {
+    case 'B':
+        if (!shiftPressed)
+            commandId = IDM_FORMAT_BOLD;
+        break;
+    case 'I':
+        if (!shiftPressed)
+            commandId = IDM_FORMAT_ITALIC;
+        break;
+    case 'X':
+        if (shiftPressed)
+            commandId = IDM_FORMAT_STRIKETHROUGH;
+        break;
+    default:
+        break;
+    }
+
+    if (commandId == 0)
+        return false;
+
+    SendMessageW(g_hwndMain, WM_COMMAND, MAKEWPARAM(commandId, 0), 0);
+    SetFocus(hwnd);
+    return true;
+}
+}
+
 std::wstring GetEditorText()
 {
     std::wstring text;
@@ -84,6 +349,28 @@ void SetEditorText(const std::wstring &text)
     StreamCookie cookie = {&text, 0};
     EDITSTREAM es = {reinterpret_cast<DWORD_PTR>(&cookie), 0, StreamInCallback};
     SendMessageW(g_hwndEditor, EM_STREAMIN, SF_TEXT | SF_UNICODE, reinterpret_cast<LPARAM>(&es));
+}
+
+std::string GetEditorRichText()
+{
+    std::string rtf;
+    StreamOutAnsiCookie cookie = {&rtf};
+    EDITSTREAM es = {reinterpret_cast<DWORD_PTR>(&cookie), 0, StreamOutAnsiCallback};
+    SendMessageW(g_hwndEditor, EM_STREAMOUT, SF_RTF, reinterpret_cast<LPARAM>(&es));
+    return rtf;
+}
+
+void SetEditorRichText(const std::string &rtf)
+{
+    if (rtf.empty())
+    {
+        SetEditorText(L"");
+        return;
+    }
+
+    StreamInAnsiCookie cookie = {&rtf, 0};
+    EDITSTREAM es = {reinterpret_cast<DWORD_PTR>(&cookie), 0, StreamInAnsiCallback};
+    SendMessageW(g_hwndEditor, EM_STREAMIN, SF_RTF, reinterpret_cast<LPARAM>(&es));
 }
 
 std::pair<int, int> GetCursorPos()
@@ -101,9 +388,14 @@ void ConfigureEditorControl(HWND hwnd)
     if (!hwnd)
         return;
 
-    // Keep RichEdit in plain-text mode and disable URL auto-detection for security/perf.
-    SendMessageW(hwnd, EM_SETTEXTMODE, TM_PLAINTEXT | TM_MULTILEVELUNDO | TM_MULTICODEPAGE, 0);
+    // Use rich text mode for inline formatting commands (bold/italic/strikethrough),
+    // while keeping large-file mode plain-text-first for responsiveness.
+    SendMessageW(hwnd, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L""));
+    const DWORD mode = (g_state.largeFileMode ? TM_PLAINTEXT : TM_RICHTEXT) | TM_MULTILEVELUNDO | TM_MULTICODEPAGE;
+    if (SendMessageW(hwnd, EM_SETTEXTMODE, mode, 0) != 0)
+        SendMessageW(hwnd, EM_SETTEXTMODE, TM_PLAINTEXT | TM_MULTILEVELUNDO | TM_MULTICODEPAGE, 0);
     SendMessageW(hwnd, EM_AUTOURLDETECT, FALSE, 0);
+    ApplyFlatScrollbarStyle(hwnd);
 }
 
 void ApplyEditorViewportPadding()
@@ -144,6 +436,11 @@ void ApplyEditorViewportPadding()
         formatRect.bottom = formatRect.top + 1;
 
     SendMessageW(g_hwndEditor, EM_SETRECTNP, 0, reinterpret_cast<LPARAM>(&formatRect));
+}
+
+void ApplyEditorScrollbarChrome()
+{
+    ApplyFlatScrollbarStyle(g_hwndEditor);
 }
 
 void ApplyFont()
@@ -285,6 +582,12 @@ LRESULT CALLBACK EditorSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         }
         break;
     case WM_CHAR:
+    {
+        if (wParam == VK_RETURN && g_suppressNextReturnChar)
+        {
+            g_suppressNextReturnChar = false;
+            return 0;
+        }
         if (wParam == 3)
             break;
         if (wParam == 22)
@@ -300,14 +603,13 @@ LRESULT CALLBACK EditorSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             if (GetKeyState(VK_CONTROL) & 0x8000)
                 return 0;
         }
-        if (g_state.background.enabled && g_bgImage && !g_state.largeFileMode)
-        {
-            LRESULT result = CallWindowProcW(g_origEditorProc, hwnd, msg, wParam, lParam);
-            InvalidateRect(hwnd, nullptr, TRUE);
-            return result;
-        }
         break;
+    }
     case WM_KEYDOWN:
+        if (HandleInlineFormattingShortcut(hwnd, wParam))
+            return 0;
+        if (HandleAutoListEnterKeyDown(hwnd, wParam, lParam))
+            return 0;
         if (GetKeyState(VK_CONTROL) & 0x8000)
         {
             if (wParam == VK_BACK)
@@ -320,12 +622,6 @@ LRESULT CALLBACK EditorSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                 DeleteWordForward();
                 return 0;
             }
-        }
-        if (g_state.background.enabled && g_bgImage && !g_state.largeFileMode && (wParam == VK_BACK || wParam == VK_DELETE))
-        {
-            LRESULT result = CallWindowProcW(g_origEditorProc, hwnd, msg, wParam, lParam);
-            InvalidateRect(hwnd, nullptr, TRUE);
-            return result;
         }
         break;
     case WM_MOUSEWHEEL:

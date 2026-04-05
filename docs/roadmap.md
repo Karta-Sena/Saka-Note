@@ -1,4 +1,4 @@
-# Saka Note Roadmap
+# Technical Standard Note Roadmap
 
 Roadmap ini disusun dari audit codebase saat ini (Win32 C++), fokus pada stabilitas, performa, dan UX modern tanpa mengorbankan lightweight footprint.
 
@@ -96,3 +96,4 @@ Goal / Tujuan: rilis makin siap pakai dan kredibel.
   - large-file scenarios show measurable memory/latency improvement
 - P4 done when:
   - release artifacts are signed and validation checklist is automated
+

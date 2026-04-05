@@ -85,22 +85,34 @@ void TabRefreshVisualMetrics()
     LOGFONTW baseLf{};
     if (!SystemParametersInfoW(SPI_GETICONTITLELOGFONT, sizeof(baseLf), &baseLf, 0))
     {
-        baseLf.lfHeight = -11;
+        baseLf.lfHeight = -MulDiv(9, g_tabsDpi, 72);
         wcscpy_s(baseLf.lfFaceName, L"Segoe UI");
         baseLf.lfWeight = FW_NORMAL;
     }
-    baseLf.lfHeight = -TabScalePx(12);
+    baseLf.lfHeight = -MulDiv(9, g_tabsDpi, 72);
     baseLf.lfWeight = FW_NORMAL;
+    baseLf.lfQuality = CLEARTYPE_QUALITY;
+    wcscpy_s(baseLf.lfFaceName, L"Segoe UI");
 
     g_hTabFontRegular = CreateFontIndirectW(&baseLf);
+    if (!g_hTabFontRegular)
+    {
+        wcscpy_s(baseLf.lfFaceName, L"Segoe UI");
+        g_hTabFontRegular = CreateFontIndirectW(&baseLf);
+    }
 
     LOGFONTW activeLf = baseLf;
-    activeLf.lfWeight = FW_SEMIBOLD;
+    activeLf.lfWeight = FW_NORMAL;
     g_hTabFontActive = CreateFontIndirectW(&activeLf);
+    if (!g_hTabFontActive)
+    {
+        wcscpy_s(activeLf.lfFaceName, L"Segoe UI");
+        g_hTabFontActive = CreateFontIndirectW(&activeLf);
+    }
 
     HFONT effectiveFont = g_hTabFontRegular ? g_hTabFontRegular : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
     SendMessageW(g_hwndTabs, WM_SETFONT, reinterpret_cast<WPARAM>(effectiveFont), TRUE);
-    SendMessageW(g_hwndTabs, TCM_SETPADDING, 0, MAKELPARAM(TabScalePx(12), TabScalePx(4)));
+    SendMessageW(g_hwndTabs, TCM_SETPADDING, 0, MAKELPARAM(TabScalePx(14), TabScalePx(5)));
 }
 
 HFONT TabGetRegularFont()

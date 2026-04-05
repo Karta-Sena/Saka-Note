@@ -3,7 +3,7 @@
 #include "lang.h"
 
 inline LangStrings g_langJA = {
-    L"Saka Note",
+    L"Technical Standard Note",
     L"無題",
 
     L"ファイル(&F)",
@@ -36,6 +36,9 @@ inline LangStrings g_langJA = {
     L"書式(&O)",
     L"折り返し(&W)",
     L"フォント(&F)...",
+    L"太字(&B)\tCtrl+B",
+    L"斜体(&I)\tCtrl+I",
+    L"取り消し線(&K)\tCtrl+Shift+X",
 
     L"表示(&V)",
     L"拡大(&I)\tCtrl+Plus",
@@ -65,7 +68,7 @@ inline LangStrings g_langJA = {
     L"常に最前面に表示(&T)",
 
     L"ヘルプ(&H)",
-    L"Saka Note について(&A)",
+    L"Technical Standard Note について(&A)",
     L"更新を確認(&U)...",
     L"パフォーマンス ベンチマーク(&B)",
 
@@ -99,7 +102,7 @@ inline LangStrings g_langJA = {
     L"ファイルを開けません。",
     L"ファイルを保存できません。",
     L"エラー",
-    L"Saka Note v1.3.0\n\nSaka Studio & Engineering により開発。\n速度、安定性、明快さに重点を置いた軽量 Win32 テキストエディタです。\n",
+    L"Technical Standard Note v1.3.0\n\nSaka Studio & Engineering により開発。\n速度、安定性、明快さに重点を置いた軽量 Win32 テキストエディタです。\n",
     L"RichEdit コントロールを読み込めません。",
     L"先に他のタブを閉じてから、タブモードを無効にしてください。",
     L"指定した行番号は、ファイル内の総行数を超えています。",
@@ -135,3 +138,4 @@ inline LangStrings g_langJA = {
     L"Windows (CRLF)",
     L"Unix (LF)",
     L"Macintosh (CR)"};
+

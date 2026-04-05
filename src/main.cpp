@@ -1,7 +1,7 @@
 /*
   Saka Studio & Engineering
 
-  Main entry point and window procedure for Saka Note text editor application.
+  Main entry point and window procedure for Technical Standard Note text editor application.
   Coordinates all modules and handles Windows message loop and command dispatching.
 */
 
@@ -72,9 +72,101 @@ static constexpr DWORD kSessionMaxFileBytes = 64 * 1024 * 1024;
 static constexpr UINT_PTR kSessionAutosaveTimerId = 0x4C4E01;
 static constexpr UINT kSessionAutosaveIntervalMs = 1500;
 static constexpr DWORD kSessionRetryBackoffMs = 10000;
+static constexpr bool kEnableCommandBar = false;
 static bool g_sessionDirty = false;
 static bool g_sessionPersisting = false;
 static DWORD g_sessionRetryAtTick = 0;
+static HFONT g_hChromeUiFont = nullptr;
+static std::vector<std::wstring> g_loadedPrivateFonts;
+
+static std::wstring RuntimeDirectoryPath()
+{
+    wchar_t modulePath[MAX_PATH] = {};
+    if (GetModuleFileNameW(nullptr, modulePath, MAX_PATH) == 0)
+        return L".";
+    PathRemoveFileSpecW(modulePath);
+    return modulePath;
+}
+
+static void LoadBundledFonts()
+{
+    if (!g_loadedPrivateFonts.empty())
+        return;
+
+    static constexpr const wchar_t *kBundledFontFiles[] = {
+        L"Berkeley Mono Condensed.ttf",
+        L"Berkeley Mono Condensed Bold.ttf",
+        L"Berkeley Mono Condensed Oblique.ttf",
+        L"Berkeley Mono Condensed Bold Oblique.ttf",
+    };
+
+    const std::wstring fontDir = RuntimeDirectoryPath() + L"\\fonts\\";
+    for (const wchar_t *fileName : kBundledFontFiles)
+    {
+        std::wstring fontPath = fontDir + fileName;
+        if (GetFileAttributesW(fontPath.c_str()) == INVALID_FILE_ATTRIBUTES)
+            continue;
+
+        const int added = AddFontResourceExW(fontPath.c_str(), FR_PRIVATE, nullptr);
+        if (added > 0)
+            g_loadedPrivateFonts.push_back(std::move(fontPath));
+    }
+}
+
+static void UnloadBundledFonts()
+{
+    for (auto it = g_loadedPrivateFonts.rbegin(); it != g_loadedPrivateFonts.rend(); ++it)
+        RemoveFontResourceExW(it->c_str(), FR_PRIVATE, nullptr);
+    g_loadedPrivateFonts.clear();
+}
+
+static HFONT BuildChromeUiFont()
+{
+    int dpiY = 96;
+    HWND ref = g_hwndMain ? g_hwndMain : g_hwndStatus;
+    if (ref)
+    {
+        HDC hdc = GetDC(ref);
+        if (hdc)
+        {
+            const int readDpi = GetDeviceCaps(hdc, LOGPIXELSY);
+            if (readDpi > 0)
+                dpiY = readDpi;
+            ReleaseDC(ref, hdc);
+        }
+    }
+
+    LOGFONTW lf{};
+    lf.lfHeight = -MulDiv(9, dpiY, 72);
+    lf.lfWeight = FW_NORMAL;
+    lf.lfQuality = CLEARTYPE_QUALITY;
+    wcscpy_s(lf.lfFaceName, L"Berkeley Mono Condensed");
+
+    HFONT font = CreateFontIndirectW(&lf);
+    if (font)
+        return font;
+    return reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+}
+
+static HFONT ChromeUiFontOrDefault()
+{
+    return g_hChromeUiFont ? g_hChromeUiFont : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+}
+
+static void RefreshChromeUiFont()
+{
+    if (g_hChromeUiFont)
+    {
+        DeleteObject(g_hChromeUiFont);
+        g_hChromeUiFont = nullptr;
+    }
+
+    g_hChromeUiFont = BuildChromeUiFont();
+    if (g_hwndStatus)
+        SendMessageW(g_hwndStatus, WM_SETFONT, reinterpret_cast<WPARAM>(ChromeUiFontOrDefault()), TRUE);
+    if (g_hwndCommandBar)
+        SendMessageW(g_hwndCommandBar, WM_SETFONT, reinterpret_cast<WPARAM>(ChromeUiFontOrDefault()), TRUE);
+}
 
 static void MarkSessionDirty()
 {
@@ -91,6 +183,135 @@ static void UpdateSessionAutosaveTimer()
         SetTimer(g_hwndMain, kSessionAutosaveTimerId, kSessionAutosaveIntervalMs, nullptr);
     else
         KillTimer(g_hwndMain, kSessionAutosaveTimerId);
+}
+
+static constexpr UINT_PTR kCommandBarButtonIds[] = {
+    IDM_FILE_NEW,
+    IDM_FILE_OPEN,
+    IDM_FILE_SAVE,
+    IDM_EDIT_FIND,
+    IDM_FORMAT_WORDWRAP,
+    IDM_VIEW_DARKMODE,
+};
+static constexpr size_t kCommandBarButtonCount = sizeof(kCommandBarButtonIds) / sizeof(kCommandBarButtonIds[0]);
+static std::wstring g_commandBarLabels[kCommandBarButtonCount];
+
+static std::wstring CommandBarLabelForId(UINT_PTR id)
+{
+    const auto &lang = GetLangStrings();
+    switch (id)
+    {
+    case IDM_FILE_NEW:
+        return MenuLabelForContext(lang.menuNew);
+    case IDM_FILE_OPEN:
+        return MenuLabelForContext(lang.menuOpen);
+    case IDM_FILE_SAVE:
+        return MenuLabelForContext(lang.menuSave);
+    case IDM_EDIT_FIND:
+        return MenuLabelForContext(lang.menuFind);
+    case IDM_FORMAT_WORDWRAP:
+        return MenuLabelForContext(lang.menuWordWrap);
+    case IDM_VIEW_DARKMODE:
+        return MenuLabelForContext(lang.menuDarkMode);
+    default:
+        return L"";
+    }
+}
+
+static void RefreshCommandBarLabels()
+{
+    if (!g_hwndCommandBar)
+        return;
+
+    const int existingCount = static_cast<int>(SendMessageW(g_hwndCommandBar, TB_BUTTONCOUNT, 0, 0));
+    for (int i = existingCount - 1; i >= 0; --i)
+        SendMessageW(g_hwndCommandBar, TB_DELETEBUTTON, static_cast<WPARAM>(i), 0);
+
+    for (size_t i = 0; i < kCommandBarButtonCount; ++i)
+    {
+        std::wstring label = CommandBarLabelForId(kCommandBarButtonIds[i]);
+        if (label.empty())
+            label = L" ";
+        g_commandBarLabels[i] = std::move(label);
+    }
+    size_t labelIndex = 0;
+
+    std::vector<TBBUTTON> buttons;
+    buttons.reserve(kCommandBarButtonCount);
+
+    auto pushButton = [&](UINT_PTR id, BYTE extraStyle = 0)
+    {
+        TBBUTTON btn{};
+        btn.iBitmap = I_IMAGENONE;
+        btn.idCommand = static_cast<int>(id);
+        btn.fsState = TBSTATE_ENABLED;
+        btn.fsStyle = static_cast<BYTE>(BTNS_AUTOSIZE | BTNS_SHOWTEXT | BTNS_BUTTON | extraStyle);
+        if (labelIndex < kCommandBarButtonCount)
+            btn.iString = reinterpret_cast<INT_PTR>(g_commandBarLabels[labelIndex].c_str());
+        else
+            btn.iString = reinterpret_cast<INT_PTR>(L" ");
+        ++labelIndex;
+        buttons.push_back(btn);
+    };
+
+    pushButton(IDM_FILE_NEW);
+    pushButton(IDM_FILE_OPEN);
+    pushButton(IDM_FILE_SAVE);
+    pushButton(IDM_EDIT_FIND);
+    pushButton(IDM_FORMAT_WORDWRAP, BTNS_CHECK);
+    pushButton(IDM_VIEW_DARKMODE, BTNS_CHECK);
+
+    SendMessageW(g_hwndCommandBar, TB_ADDBUTTONSW, static_cast<WPARAM>(buttons.size()), reinterpret_cast<LPARAM>(buttons.data()));
+    SendMessageW(g_hwndCommandBar, TB_AUTOSIZE, 0, 0);
+}
+
+static void RefreshCommandBarMetrics()
+{
+    if (!g_hwndCommandBar)
+        return;
+
+    SendMessageW(g_hwndCommandBar, WM_SETFONT, reinterpret_cast<WPARAM>(ChromeUiFontOrDefault()), TRUE);
+    SendMessageW(g_hwndCommandBar, TB_SETPADDING, 0, MAKELPARAM(TabScalePx(12), TabScalePx(6)));
+    SendMessageW(g_hwndCommandBar, TB_SETINDENT, TabScalePx(8), 0);
+    SendMessageW(g_hwndCommandBar, TB_AUTOSIZE, 0, 0);
+}
+
+static void RefreshCommandBarTheme()
+{
+    if (!g_hwndCommandBar)
+        return;
+
+    InvalidateRect(g_hwndCommandBar, nullptr, FALSE);
+}
+
+static void InitializeCommandBar()
+{
+    if (!g_hwndCommandBar)
+        return;
+
+    SendMessageW(g_hwndCommandBar, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
+    SendMessageW(g_hwndCommandBar, TB_SETMAXTEXTROWS, 1, 0);
+    SendMessageW(g_hwndCommandBar,
+                 TB_SETEXTENDEDSTYLE,
+                 0,
+                 TBSTYLE_EX_MIXEDBUTTONS | TBSTYLE_EX_DOUBLEBUFFER | TBSTYLE_EX_HIDECLIPPEDBUTTONS);
+    RefreshCommandBarLabels();
+    RefreshCommandBarMetrics();
+    RefreshCommandBarTheme();
+}
+
+static void RefreshCommandBarStates()
+{
+    if (!g_hwndCommandBar)
+        return;
+
+    const BOOL wrapEnabled = (g_state.wordWrap && !g_state.largeFileMode) ? TRUE : FALSE;
+    const BOOL darkEnabled = IsDarkMode() ? TRUE : FALSE;
+    const BOOL wrapToggleEnabled = g_state.largeFileMode ? FALSE : TRUE;
+
+    SendMessageW(g_hwndCommandBar, TB_ENABLEBUTTON, IDM_FORMAT_WORDWRAP, MAKELONG(wrapToggleEnabled, 0));
+    SendMessageW(g_hwndCommandBar, TB_CHECKBUTTON, IDM_FORMAT_WORDWRAP, MAKELONG(wrapEnabled, 0));
+    SendMessageW(g_hwndCommandBar, TB_CHECKBUTTON, IDM_VIEW_DARKMODE, MAKELONG(darkEnabled, 0));
 }
 
 static void UpdateRuntimeMenuStates();
@@ -118,9 +339,20 @@ static void EnsureSingleDocumentModel(bool captureEditorText)
 {
     DocumentTabState doc;
     if (captureEditorText || g_documents.empty() || g_activeDocument < 0 || g_activeDocument >= static_cast<int>(g_documents.size()))
+    {
         doc.text = GetEditorText();
+        if (!g_state.largeFileMode)
+        {
+            doc.richText = GetEditorRichText();
+            doc.hasRichText = !doc.richText.empty();
+        }
+    }
     else
+    {
         doc.text = g_documents[g_activeDocument].text;
+        doc.richText = g_documents[g_activeDocument].richText;
+        doc.hasRichText = g_documents[g_activeDocument].hasRichText;
+    }
 
     doc.filePath = g_state.filePath;
     doc.modified = g_state.modified;
@@ -253,8 +485,8 @@ static std::wstring DocumentTabLabel(const DocumentTabState &doc)
 static RECT TabCloseRect(const RECT &itemRect)
 {
     RECT rc = itemRect;
-    const int closeSize = TabScalePx(14);
-    const int rightPadding = TabScalePx(8);
+    const int closeSize = TabScalePx(12);
+    const int rightPadding = TabScalePx(10);
     const int topOffset = ((rc.bottom - rc.top) - closeSize) / 2;
     rc.right -= rightPadding;
     rc.left = rc.right - closeSize;
@@ -267,8 +499,8 @@ static RECT TabTextRect(const RECT &itemRect)
 {
     RECT rc = itemRect;
     const RECT closeRc = TabCloseRect(itemRect);
-    rc.left += TabScalePx(10);
-    rc.right = closeRc.left - TabScalePx(8);
+    rc.left += TabScalePx(12);
+    rc.right = closeRc.left - TabScalePx(10);
     if (rc.right < rc.left)
         rc.right = rc.left;
     return rc;
@@ -312,15 +544,9 @@ static void RebuildTabsControl()
 
 static bool IsTabCloseRectHit(int index, POINT ptClient)
 {
-    if (!g_hwndTabs || index < 0 || index >= TabCtrl_GetItemCount(g_hwndTabs))
-        return false;
-
-    RECT rc{};
-    if (!TabCtrl_GetItemRect(g_hwndTabs, index, &rc))
-        return false;
-
-    RECT closeRc = TabCloseRect(rc);
-    return PtInRect(&closeRc, ptClient) != 0;
+    (void)index;
+    (void)ptClient;
+    return false;
 }
 
 static bool IsTabCloseHotspot(int index, POINT ptClient)
@@ -337,9 +563,20 @@ static void SyncDocumentFromState(int index, bool includeText)
         return;
 
     DocumentTabState &doc = g_documents[index];
+    const bool tabLabelChanged = (doc.filePath != g_state.filePath) || (doc.modified != g_state.modified);
     if (includeText)
     {
         doc.text = GetEditorText();
+        if (!g_state.largeFileMode)
+        {
+            doc.richText = GetEditorRichText();
+            doc.hasRichText = !doc.richText.empty();
+        }
+        else
+        {
+            doc.richText.clear();
+            doc.hasRichText = false;
+        }
         doc.needsReloadFromDisk = false;
     }
     doc.filePath = g_state.filePath;
@@ -348,7 +585,8 @@ static void SyncDocumentFromState(int index, bool includeText)
     doc.lineEnding = g_state.lineEnding;
     doc.sourceBytes = (g_state.largeFileBytes > 0) ? g_state.largeFileBytes : EstimateDocumentTextBytes(doc.text);
     doc.largeFileMode = g_state.largeFileMode || ShouldUseLargeDocumentMode(doc.sourceBytes);
-    SetDocumentTabLabel(index);
+    if (tabLabelChanged)
+        SetDocumentTabLabel(index);
 }
 
 static void LoadStateFromDocument(int index)
@@ -378,7 +616,10 @@ static void LoadStateFromDocument(int index)
     g_state.largeFileBytes = doc.sourceBytes;
     if (wrapModeChanged)
         ApplyWordWrap();
-    SetEditorText(doc.text);
+    if (doc.hasRichText && !doc.richText.empty() && !doc.largeFileMode)
+        SetEditorRichText(doc.richText);
+    else
+        SetEditorText(doc.text);
     UpdateTitle();
     UpdateStatus();
     SetDocumentTabLabel(index);
@@ -419,6 +660,11 @@ static void CreateInitialDocumentTabIfNeeded()
 
     DocumentTabState doc;
     doc.text = GetEditorText();
+    if (!g_state.largeFileMode)
+    {
+        doc.richText = GetEditorRichText();
+        doc.hasRichText = !doc.richText.empty();
+    }
     doc.filePath = g_state.filePath;
     doc.modified = g_state.modified;
     doc.encoding = g_state.encoding;
@@ -566,6 +812,16 @@ static bool SaveOpenDocumentSession(bool persistPathFallback)
         else
         {
             activeDoc.needsReloadFromDisk = false;
+        }
+        if (!g_state.largeFileMode)
+        {
+            activeDoc.richText = GetEditorRichText();
+            activeDoc.hasRichText = !activeDoc.richText.empty();
+        }
+        else
+        {
+            activeDoc.richText.clear();
+            activeDoc.hasRichText = false;
         }
         activeDoc.filePath = g_state.filePath;
         activeDoc.modified = g_state.modified;
@@ -821,11 +1077,24 @@ static void ReorderDocumentTab(int fromIndex, int toIndex)
     if (fromIndex == toIndex)
         return;
 
-    std::swap(g_documents[fromIndex], g_documents[toIndex]);
+    DocumentTabState moving = std::move(g_documents[fromIndex]);
+    g_documents.erase(g_documents.begin() + fromIndex);
+    g_documents.insert(g_documents.begin() + toIndex, std::move(moving));
+
     if (g_activeDocument == fromIndex)
+    {
         g_activeDocument = toIndex;
-    else if (g_activeDocument == toIndex)
-        g_activeDocument = fromIndex;
+    }
+    else if (fromIndex < toIndex)
+    {
+        if (g_activeDocument > fromIndex && g_activeDocument <= toIndex)
+            --g_activeDocument;
+    }
+    else
+    {
+        if (g_activeDocument >= toIndex && g_activeDocument < fromIndex)
+            ++g_activeDocument;
+    }
 
     RebuildTabsControl();
     UpdateRuntimeMenuStates();
@@ -860,6 +1129,9 @@ static void UpdateRuntimeMenuStates()
                        MF_BYCOMMAND);
     CheckMenuItem(hMenu, IDM_FORMAT_WORDWRAP, MF_BYCOMMAND | ((g_state.wordWrap && !g_state.largeFileMode) ? MF_CHECKED : MF_UNCHECKED));
     EnableMenuItem(hMenu, IDM_FORMAT_WORDWRAP, MF_BYCOMMAND | (g_state.largeFileMode ? MF_GRAYED : MF_ENABLED));
+    EnableMenuItem(hMenu, IDM_FORMAT_BOLD, MF_BYCOMMAND | (g_state.largeFileMode ? MF_GRAYED : MF_ENABLED));
+    EnableMenuItem(hMenu, IDM_FORMAT_ITALIC, MF_BYCOMMAND | (g_state.largeFileMode ? MF_GRAYED : MF_ENABLED));
+    EnableMenuItem(hMenu, IDM_FORMAT_STRIKETHROUGH, MF_BYCOMMAND | (g_state.largeFileMode ? MF_GRAYED : MF_ENABLED));
 
     const bool tabModeActive = g_state.useTabs;
     const bool hasMultipleTabs = g_documents.size() > 1;
@@ -869,6 +1141,8 @@ static void UpdateRuntimeMenuStates()
     EnableMenuItem(hMenu, IDM_FILE_REOPENCLOSEDTAB, MF_BYCOMMAND | ((tabModeActive && hasClosedTabs) ? MF_ENABLED : MF_GRAYED));
     EnableMenuItem(hMenu, IDM_FILE_NEXTTAB, MF_BYCOMMAND | ((tabModeActive && hasMultipleTabs) ? MF_ENABLED : MF_GRAYED));
     EnableMenuItem(hMenu, IDM_FILE_PREVTAB, MF_BYCOMMAND | ((tabModeActive && hasMultipleTabs) ? MF_ENABLED : MF_GRAYED));
+
+    RefreshCommandBarStates();
 
     DrawMenuBar(g_hwndMain);
 }
@@ -881,7 +1155,7 @@ static void DrawCloseGlyph(HDC hdc, const RECT &rc, COLORREF color)
         return;
     HGDIOBJ oldPen = SelectObject(hdc, hPen);
 
-    const int margin = TabScalePx(4);
+    const int margin = TabScalePx(3);
     MoveToEx(hdc, rc.left + margin, rc.top + margin, nullptr);
     LineTo(hdc, rc.right - margin, rc.bottom - margin);
     MoveToEx(hdc, rc.right - margin, rc.top + margin, nullptr);
@@ -889,6 +1163,95 @@ static void DrawCloseGlyph(HDC hdc, const RECT &rc, COLORREF color)
 
     SelectObject(hdc, oldPen);
     DeleteObject(hPen);
+}
+
+struct CommandBarPalette
+{
+    COLORREF background;
+    COLORREF border;
+    COLORREF text;
+    COLORREF disabledText;
+    COLORREF hoverBg;
+    COLORREF checkedBg;
+};
+
+static CommandBarPalette GetCommandBarPalette(bool dark)
+{
+    if (dark)
+    {
+        return {
+            ThemeColorMenuBackground(true),
+            ThemeColorChromeBorder(true),
+            ThemeColorMenuText(true),
+            RGB(130, 137, 149),
+            RGB(52, 56, 64),
+            RGB(60, 65, 74),
+        };
+    }
+
+    return {
+        ThemeColorMenuBackground(false),
+        ThemeColorChromeBorder(false),
+        ThemeColorMenuText(false),
+        RGB(146, 150, 158),
+        RGB(229, 231, 236),
+        RGB(220, 224, 231),
+    };
+}
+
+static LRESULT HandleCommandBarCustomDraw(LPNMTBCUSTOMDRAW draw)
+{
+    if (!draw || !g_hwndCommandBar)
+        return CDRF_DODEFAULT;
+
+    const bool dark = IsDarkMode();
+    const CommandBarPalette palette = GetCommandBarPalette(dark);
+
+    if (draw->nmcd.dwDrawStage == CDDS_PREPAINT)
+    {
+        RECT rc{};
+        GetClientRect(g_hwndCommandBar, &rc);
+        HBRUSH hbrBg = CreateSolidBrush(palette.background);
+        if (hbrBg)
+        {
+            FillRect(draw->nmcd.hdc, &rc, hbrBg);
+            DeleteObject(hbrBg);
+        }
+
+        RECT border = rc;
+        border.top = std::max(border.top, border.bottom - std::max(1, TabScalePx(1)));
+        HBRUSH hbrBorder = CreateSolidBrush(palette.border);
+        if (hbrBorder)
+        {
+            FillRect(draw->nmcd.hdc, &border, hbrBorder);
+            DeleteObject(hbrBorder);
+        }
+        return CDRF_NOTIFYITEMDRAW;
+    }
+
+    if (draw->nmcd.dwDrawStage != CDDS_ITEMPREPAINT)
+        return CDRF_DODEFAULT;
+
+    const bool disabled = (draw->nmcd.uItemState & CDIS_DISABLED) != 0;
+    const bool checked = (draw->nmcd.uItemState & CDIS_CHECKED) != 0;
+    const bool hot = (draw->nmcd.uItemState & (CDIS_HOT | CDIS_SELECTED)) != 0;
+
+    RECT rc = draw->nmcd.rc;
+    InflateRect(&rc, -TabScalePx(2), -TabScalePx(2));
+    if (checked || hot)
+    {
+        HBRUSH hbrItem = CreateSolidBrush(checked ? palette.checkedBg : palette.hoverBg);
+        if (hbrItem)
+        {
+            FillRect(draw->nmcd.hdc, &rc, hbrItem);
+            DeleteObject(hbrItem);
+        }
+    }
+
+    draw->clrText = disabled ? palette.disabledText : palette.text;
+    SetBkMode(draw->nmcd.hdc, TRANSPARENT);
+    SelectObject(draw->nmcd.hdc, ChromeUiFontOrDefault());
+    return static_cast<LRESULT>(TBCDRF_USECDCOLORS | TBCDRF_NOEDGES | TBCDRF_NOOFFSET | TBCDRF_NOBACKGROUND | CDRF_NEWFONT);
 }
 
 struct TabPaintPalette
@@ -911,32 +1274,32 @@ static TabPaintPalette GetTabPaintPalette(bool dark)
     if (dark)
     {
         return {
-            RGB(24, 27, 32),  // stripBg
-            RGB(56, 62, 72),  // stripBorder
-            RGB(44, 50, 58),  // activeBg
-            RGB(24, 27, 32),  // inactiveBg
-            RGB(39, 44, 51),  // hoverBg
-            RGB(68, 74, 84),  // borderColor
-            RGB(212, 218, 226), // textColor
-            RGB(247, 249, 252), // activeTextColor
-            RGB(204, 210, 220), // closeColor
-            RGB(170, 63, 63),   // closeHoverBg
-            RGB(255, 255, 255)  // closeHoverFg
+            RGB(34, 37, 42),    // stripBg
+            RGB(60, 64, 72),    // stripBorder
+            RGB(55, 59, 66),    // activeBg
+            RGB(34, 37, 42),    // inactiveBg
+            RGB(46, 50, 57),    // hoverBg
+            RGB(72, 77, 87),    // borderColor
+            RGB(208, 213, 222), // textColor
+            RGB(245, 247, 252), // activeTextColor
+            RGB(185, 191, 203), // closeColor
+            RGB(72, 77, 87),    // closeHoverBg
+            RGB(246, 248, 252)  // closeHoverFg
         };
     }
 
     return {
-        RGB(246, 248, 252),  // stripBg
-        RGB(214, 220, 229),  // stripBorder
-        RGB(255, 255, 255),  // activeBg
-        RGB(246, 248, 252),  // inactiveBg
-        RGB(230, 235, 243),  // hoverBg
-        RGB(203, 210, 220),  // borderColor
-        RGB(70, 76, 84),     // textColor
-        RGB(23, 27, 32),     // activeTextColor
-        RGB(92, 97, 104),    // closeColor
-        RGB(225, 79, 79),    // closeHoverBg
-        RGB(255, 255, 255)   // closeHoverFg
+        RGB(242, 242, 244), // stripBg
+        RGB(210, 214, 221), // stripBorder
+        RGB(255, 255, 255), // activeBg
+        RGB(242, 242, 244), // inactiveBg
+        RGB(229, 232, 238), // hoverBg
+        RGB(204, 209, 217), // borderColor
+        RGB(76, 81, 89),    // textColor
+        RGB(24, 27, 32),    // activeTextColor
+        RGB(98, 103, 112),  // closeColor
+        RGB(210, 214, 222), // closeHoverBg
+        RGB(28, 31, 36)     // closeHoverFg
     };
 }
 
@@ -949,44 +1312,33 @@ static void FillSolidRectDc(HDC hdc, const RECT &rc, COLORREF color)
     SelectObject(hdc, oldBrush);
 }
 
-static void DrawRoundedRectDc(HDC hdc, const RECT &rc, int radius, COLORREF fillColor, COLORREF borderColor)
+static void DrawRectOutlineDc(HDC hdc, const RECT &rc, COLORREF color, bool includeBottom = true)
 {
-    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(DC_BRUSH));
-    HGDIOBJ oldPen = SelectObject(hdc, GetStockObject(DC_PEN));
-    const COLORREF oldBrushColor = SetDCBrushColor(hdc, fillColor);
-    const COLORREF oldPenColor = SetDCPenColor(hdc, borderColor);
-    RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
-    SetDCBrushColor(hdc, oldBrushColor);
-    SetDCPenColor(hdc, oldPenColor);
-    SelectObject(hdc, oldPen);
-    SelectObject(hdc, oldBrush);
+    const int stroke = std::max(1, TabScalePx(1));
+
+    RECT top = rc;
+    top.bottom = std::min(top.bottom, top.top + stroke);
+    FillSolidRectDc(hdc, top, color);
+
+    RECT left = rc;
+    left.right = std::min(left.right, left.left + stroke);
+    FillSolidRectDc(hdc, left, color);
+
+    RECT right = rc;
+    right.left = std::max(right.left, right.right - stroke);
+    FillSolidRectDc(hdc, right, color);
+
+    if (includeBottom)
+    {
+        RECT bottom = rc;
+        bottom.top = std::max(bottom.top, bottom.bottom - stroke);
+        FillSolidRectDc(hdc, bottom, color);
+    }
 }
 
 static void DrawTabStripBackground(HDC hdc, const RECT &rcClient, const TabPaintPalette &palette)
 {
     FillSolidRectDc(hdc, rcClient, palette.stripBg);
-    RECT separator = rcClient;
-    separator.top = std::max(separator.top, separator.bottom - std::max(1, TabScalePx(1)));
-    RECT activeRect{};
-    const bool hasActive = (g_hwndTabs && g_activeDocument >= 0 && TabCtrl_GetItemRect(g_hwndTabs, g_activeDocument, &activeRect));
-    if (!hasActive)
-    {
-        FillSolidRectDc(hdc, separator, palette.stripBorder);
-        return;
-    }
-
-    activeRect.left += TabScalePx(2);
-    activeRect.right -= TabScalePx(2);
-
-    RECT leftLine = separator;
-    leftLine.right = std::max(leftLine.left, std::min(leftLine.right, activeRect.left));
-    if (leftLine.right > leftLine.left)
-        FillSolidRectDc(hdc, leftLine, palette.stripBorder);
-
-    RECT rightLine = separator;
-    rightLine.left = std::min(rightLine.right, std::max(rightLine.left, activeRect.right));
-    if (rightLine.right > rightLine.left)
-        FillSolidRectDc(hdc, rightLine, palette.stripBorder);
 }
 
 static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const TabPaintPalette &palette)
@@ -1000,26 +1352,42 @@ static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const
     const bool closeHovered = hovered && g_hoverTabClose;
 
     RECT contentRect = rawItemRect;
-    contentRect.left += TabScalePx(2);
-    contentRect.right -= TabScalePx(2);
-    contentRect.top += TabScalePx(2);
-    contentRect.bottom -= selected ? 0 : TabScalePx(4);
+    contentRect.left += TabScalePx(1);
+    contentRect.right -= TabScalePx(1);
+    contentRect.top += TabScalePx(1);
+    contentRect.bottom -= selected ? 0 : TabScalePx(2);
 
     if (selected && g_hwndTabs)
     {
         RECT strip{};
         GetClientRect(g_hwndTabs, &strip);
-        contentRect.bottom = std::max(contentRect.bottom, strip.bottom + TabScalePx(1));
+        contentRect.bottom = std::max(contentRect.bottom, strip.bottom);
     }
 
+    // Keep title baseline consistent across active/inactive tabs.
+    RECT titleBandRect = rawItemRect;
+    titleBandRect.left += TabScalePx(1);
+    titleBandRect.right -= TabScalePx(1);
+    titleBandRect.top += TabScalePx(1);
+    titleBandRect.bottom -= TabScalePx(2);
+    if (titleBandRect.bottom <= titleBandRect.top)
+        titleBandRect.bottom = titleBandRect.top + 1;
+
     const COLORREF itemBg = selected ? palette.activeBg : (hovered ? palette.hoverBg : palette.inactiveBg);
-    DrawRoundedRectDc(hdc, contentRect, selected ? TabScalePx(4) : TabScalePx(5), itemBg, selected ? palette.borderColor : itemBg);
+    FillSolidRectDc(hdc, contentRect, itemBg);
     if (selected)
     {
-        // Cover tab bottom stroke so active tab and editor page read as one continuous surface.
-        RECT joinRect = contentRect;
-        joinRect.top = std::max(joinRect.top, joinRect.bottom - std::max(1, TabScalePx(2)));
-        FillSolidRectDc(hdc, joinRect, itemBg);
+        DrawRectOutlineDc(hdc, contentRect, palette.borderColor, false);
+    }
+    else
+    {
+        // Avoid double-stroking between inactive tab and the active tab.
+        if (index + 1 != g_activeDocument)
+        {
+            RECT separator = titleBandRect;
+            separator.left = std::max(separator.left, separator.right - std::max(1, TabScalePx(1)));
+            FillSolidRectDc(hdc, separator, palette.stripBorder);
+        }
     }
 
     HFONT drawFont = selected ? TabGetActiveFont() : TabGetRegularFont();
@@ -1030,13 +1398,13 @@ static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const
     RECT textRect = {};
     if (showClose)
     {
-        textRect = TabTextRect(contentRect);
+        textRect = TabTextRect(titleBandRect);
     }
     else
     {
-        textRect = contentRect;
-        textRect.left += TabScalePx(10);
-        textRect.right -= TabScalePx(10);
+        textRect = titleBandRect;
+        textRect.left += TabScalePx(12);
+        textRect.right -= TabScalePx(12);
         if (textRect.right < textRect.left)
             textRect.right = textRect.left;
     }
@@ -1049,14 +1417,14 @@ static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const
 
     if (showClose)
     {
-        RECT closeRect = TabCloseRect(contentRect);
+        RECT closeRect = TabCloseRect(titleBandRect);
         if (closeHovered)
-            DrawRoundedRectDc(hdc, closeRect, TabScalePx(4), palette.closeHoverBg, palette.closeHoverBg);
+            FillSolidRectDc(hdc, closeRect, palette.closeHoverBg);
         DrawCloseGlyph(hdc, closeRect, closeHovered ? palette.closeHoverFg : palette.closeColor);
     }
 }
 
-static void PaintTabStripVisual(HDC hdc)
+[[maybe_unused]] static void PaintTabStripVisual(HDC hdc)
 {
     if (!hdc || !g_hwndTabs)
         return;
@@ -1073,6 +1441,39 @@ static void PaintTabStripVisual(HDC hdc)
         if (TabCtrl_GetItemRect(g_hwndTabs, i, &itemRect))
             DrawTabItemVisual(hdc, i, itemRect, palette);
     }
+}
+
+static void PaintTabStripBuffered(HWND hwnd, HDC targetHdc)
+{
+    if (!hwnd || !targetHdc)
+        return;
+
+    RECT rcClient{};
+    GetClientRect(hwnd, &rcClient);
+    const int width = std::max(1, static_cast<int>(rcClient.right - rcClient.left));
+    const int height = std::max(1, static_cast<int>(rcClient.bottom - rcClient.top));
+
+    HDC memDc = CreateCompatibleDC(targetHdc);
+    if (!memDc)
+    {
+        PaintTabStripVisual(targetHdc);
+        return;
+    }
+
+    HBITMAP backBuffer = CreateCompatibleBitmap(targetHdc, width, height);
+    if (!backBuffer)
+    {
+        DeleteDC(memDc);
+        PaintTabStripVisual(targetHdc);
+        return;
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(memDc, backBuffer);
+    PaintTabStripVisual(memDc);
+    BitBlt(targetHdc, 0, 0, width, height, memDc, 0, 0, SRCCOPY);
+    SelectObject(memDc, oldBitmap);
+    DeleteObject(backBuffer);
+    DeleteDC(memDc);
 }
 
 static void UpdateTabsHoverState(HWND hwnd, POINT ptClient)
@@ -1100,7 +1501,7 @@ static void UpdateTabsHoverState(HWND hwnd, POINT ptClient)
     }
 }
 
-static LRESULT HandleTabsCustomDraw(LPNMCUSTOMDRAW draw)
+[[maybe_unused]] static LRESULT HandleTabsCustomDraw(LPNMCUSTOMDRAW draw)
 {
     if (!draw || !g_hwndTabs)
         return CDRF_DODEFAULT;
@@ -1124,7 +1525,9 @@ static LRESULT HandleTabsCustomDraw(LPNMCUSTOMDRAW draw)
         return CDRF_SKIPDEFAULT;
 
     const TabPaintPalette palette = GetTabPaintPalette(IsDarkMode());
-    DrawTabItemVisual(draw->hdc, index, draw->rc, palette);
+    RECT itemRect = draw->rc;
+    TabCtrl_GetItemRect(g_hwndTabs, index, &itemRect);
+    DrawTabItemVisual(draw->hdc, index, itemRect, palette);
     return CDRF_SKIPDEFAULT;
 }
 
@@ -1139,24 +1542,36 @@ static LRESULT CALLBACK TabsSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         TabRefreshDpi();
         TabRefreshVisualMetrics();
         g_tabsCustomDrawObserved = false;
-        InvalidateRect(hwnd, nullptr, TRUE);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        break;
+    case WM_ERASEBKGND:
+        if (IsDarkMode())
+            return 1;
+        break;
+    case WM_PRINTCLIENT:
+        if (IsDarkMode())
+        {
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            PaintTabStripBuffered(hwnd, hdc);
+            return 0;
+        }
         break;
     case WM_PAINT:
     {
-        const LRESULT result = CallWindowProcW(g_origTabsProc, hwnd, msg, wParam, lParam);
-        if (!g_tabsCustomDrawObserved)
-        {
-            HDC hdc = GetDC(hwnd);
-            if (hdc)
-            {
-                PaintTabStripVisual(hdc);
-                ReleaseDC(hwnd, hdc);
-            }
-        }
-        return result;
+        if (!IsDarkMode())
+            return CallWindowProcW(g_origTabsProc, hwnd, msg, wParam, lParam);
+
+        PAINTSTRUCT ps{};
+        HDC hdc = BeginPaint(hwnd, &ps);
+        PaintTabStripBuffered(hwnd, hdc);
+        EndPaint(hwnd, &ps);
+        return 0;
     }
     case WM_LBUTTONDOWN:
     {
+        if (!g_state.useTabs || g_documents.size() <= 1)
+            break;
+
         POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
         TCHITTESTINFO hit{};
         hit.pt = pt;
@@ -1174,8 +1589,16 @@ static LRESULT CALLBACK TabsSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
         UpdateTabsHoverState(hwnd, pt);
 
-        if (!g_draggingTab || GetCapture() != hwnd)
+        if (!g_draggingTab)
             break;
+        if (!(wParam & MK_LBUTTON))
+        {
+            g_draggingTab = false;
+            g_dragTabIndex = -1;
+            if (GetCapture() == hwnd)
+                ReleaseCapture();
+            break;
+        }
 
         TCHITTESTINFO hit{};
         hit.pt = pt;
@@ -1184,6 +1607,7 @@ static LRESULT CALLBACK TabsSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         {
             ReorderDocumentTab(g_dragTabIndex, hoverIndex);
             g_dragTabIndex = hoverIndex;
+            return 0;
         }
         break;
     }
@@ -1200,6 +1624,7 @@ static LRESULT CALLBACK TabsSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     }
     case WM_LBUTTONUP:
     {
+        const bool wasDragging = g_draggingTab;
         POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
         TCHITTESTINFO hit{};
         hit.pt = pt;
@@ -1218,6 +1643,8 @@ static LRESULT CALLBACK TabsSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             CloseDocumentTabAt(index);
             return 0;
         }
+        if (wasDragging)
+            return 0;
         break;
     }
     case WM_MBUTTONUP:
@@ -1234,8 +1661,11 @@ static LRESULT CALLBACK TabsSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         break;
     }
     case WM_CAPTURECHANGED:
-        g_draggingTab = false;
-        g_dragTabIndex = -1;
+        if (reinterpret_cast<HWND>(lParam) != hwnd)
+        {
+            g_draggingTab = false;
+            g_dragTabIndex = -1;
+        }
         break;
     }
     return CallWindowProcW(g_origTabsProc, hwnd, msg, wParam, lParam);
@@ -1287,20 +1717,32 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                                        0, 0, 100, 100, hwnd, reinterpret_cast<HMENU>(IDC_EDITOR), GetModuleHandleW(nullptr), nullptr);
         g_origEditorProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hwndEditor, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(EditorSubclassProc)));
         ConfigureEditorControl(g_hwndEditor);
+        if (kEnableCommandBar)
+        {
+            g_hwndCommandBar = CreateWindowExW(0, TOOLBARCLASSNAMEW, nullptr,
+                                               WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TBSTYLE_FLAT | TBSTYLE_LIST | CCS_NOPARENTALIGN | CCS_NODIVIDER | CCS_NORESIZE,
+                                               0, 0, 100, TabScalePx(34), hwnd, reinterpret_cast<HMENU>(IDC_COMMANDBAR), GetModuleHandleW(nullptr), nullptr);
+            if (g_hwndCommandBar)
+            {
+                SetWindowTheme(g_hwndCommandBar, L"Explorer", nullptr);
+                InitializeCommandBar();
+            }
+        }
         g_hwndTabs = CreateWindowExW(0, WC_TABCONTROLW, L"",
                                      WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | TCS_HOTTRACK | TCS_FOCUSNEVER,
-                                     0, 0, 100, TabScalePx(32), hwnd, reinterpret_cast<HMENU>(IDC_TABS), GetModuleHandleW(nullptr), nullptr);
+                                     0, 0, 100, TabScalePx(36), hwnd, reinterpret_cast<HMENU>(IDC_TABS), GetModuleHandleW(nullptr), nullptr);
         if (g_hwndTabs)
         {
             TabRefreshDpi();
             TabRefreshVisualMetrics();
-            SetWindowTheme(g_hwndTabs, L"Explorer", nullptr);
+            SetWindowTheme(g_hwndTabs, IsDarkMode() ? L"" : L"Explorer", nullptr);
             g_tabsCustomDrawObserved = false;
             g_origTabsProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hwndTabs, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(TabsSubclassProc)));
         }
         g_hwndStatus = CreateWindowExW(0, STATUSCLASSNAMEW, nullptr,
                                        WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP, 0, 0, 0, 0, hwnd, reinterpret_cast<HMENU>(IDC_STATUSBAR), GetModuleHandleW(nullptr), nullptr);
         g_origStatusProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_hwndStatus, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(StatusSubclassProc)));
+        RefreshChromeUiFont();
         SendMessageW(g_hwndEditor, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(-1));
         SendMessageW(g_hwndEditor, EM_SETEVENTMASK, 0, ENM_CHANGE | ENM_SELCHANGE);
         ApplyFont();
@@ -1308,6 +1750,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         UpdateMenuStrings();
         UpdateRecentFilesMenu();
         UpdateLanguageMenu();
+        RefreshCommandBarLabels();
         HMENU hMainMenu = GetMenu(g_hwndMain);
         if (hMainMenu)
         {
@@ -1511,6 +1954,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         ResizeControls();
         UpdateStatus();
         return 0;
+    case WM_DPICHANGED:
+    {
+        const RECT *suggested = reinterpret_cast<const RECT *>(lParam);
+        if (suggested)
+        {
+            SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
+                         suggested->right - suggested->left,
+                         suggested->bottom - suggested->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        TabRefreshDpi();
+        TabRefreshVisualMetrics();
+        g_tabsCustomDrawObserved = false;
+        RefreshChromeUiFont();
+        ApplyEditorScrollbarChrome();
+        RefreshCommandBarMetrics();
+        ResizeControls();
+        UpdateStatus();
+        return 0;
+    }
     case WM_TIMER:
         if (wParam == kSessionAutosaveTimerId)
         {
@@ -1549,51 +2012,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             return reinterpret_cast<LRESULT>(GetStockObject(NULL_BRUSH));
         }
         break;
-    case WM_CTLCOLORSTATIC:
-        if (reinterpret_cast<HWND>(lParam) == g_hwndStatus && IsDarkMode())
-        {
-            HDC hdc = reinterpret_cast<HDC>(wParam);
-            SetTextColor(hdc, ThemeColorStatusText(true));
-            SetBkColor(hdc, ThemeColorStatusBackground(true));
-            return reinterpret_cast<LRESULT>(g_hbrStatusDark ? g_hbrStatusDark : GetStockObject(BLACK_BRUSH));
-        }
-        break;
-    case WM_DRAWITEM:
-    {
-        LPDRAWITEMSTRUCT pDIS = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
-        if (pDIS->hwndItem == g_hwndStatus && IsDarkMode())
-        {
-            const COLORREF bgColor = ThemeColorStatusBackground(true);
-            const COLORREF textColor = ThemeColorStatusText(true);
-            const COLORREF borderColor = ThemeColorChromeBorder(true);
-            HBRUSH hbr = g_hbrStatusDark ? g_hbrStatusDark : CreateSolidBrush(bgColor);
-            FillRect(pDIS->hDC, &pDIS->rcItem, hbr);
-            if (!g_hbrStatusDark)
-                DeleteObject(hbr);
-            SetBkMode(pDIS->hDC, TRANSPARENT);
-            SetTextColor(pDIS->hDC, textColor);
-            int part = static_cast<int>(pDIS->itemID);
-            if (part >= 0 && part < 4)
-            {
-                RECT rc = pDIS->rcItem;
-                rc.left += 6;
-                DrawTextW(pDIS->hDC, g_statusTexts[part].c_str(), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS);
-                if (part < 3)
-                {
-                    RECT separator = pDIS->rcItem;
-                    separator.left = separator.right - 1;
-                    HBRUSH hbrSep = CreateSolidBrush(borderColor);
-                    if (hbrSep)
-                    {
-                        FillRect(pDIS->hDC, &separator, hbrSep);
-                        DeleteObject(hbrSep);
-                    }
-                }
-            }
-            return TRUE;
-        }
-        break;
-    }
     case WM_CONTEXTMENU:
     {
         if (reinterpret_cast<HWND>(wParam) != g_hwndEditor)
@@ -1672,8 +2090,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 g_state.modified = true;
                 UpdateTitle();
             }
-            UpdateStatus();
             SyncDocumentFromState(g_activeDocument, false);
+            RefreshCommandBarStates();
             MarkSessionDirty();
             return 0;
         }
@@ -1779,6 +2197,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 UpdateMenuStrings();
                 UpdateRecentFilesMenu();
                 UpdateLanguageMenu();
+                RefreshCommandBarLabels();
                 RefreshAllDocumentTabLabels();
                 UpdateTitle();
                 UpdateStatus();
@@ -1794,6 +2213,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 UpdateMenuStrings();
                 UpdateRecentFilesMenu();
                 UpdateLanguageMenu();
+                RefreshCommandBarLabels();
                 RefreshAllDocumentTabLabels();
                 UpdateTitle();
                 UpdateStatus();
@@ -1821,6 +2241,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_NOTIFY:
     {
         NMHDR *pnmh = reinterpret_cast<NMHDR *>(lParam);
+        if (pnmh->hwndFrom == g_hwndCommandBar && pnmh->code == NM_CUSTOMDRAW)
+            return HandleCommandBarCustomDraw(reinterpret_cast<LPNMTBCUSTOMDRAW>(lParam));
         if (pnmh->hwndFrom == g_hwndTabs && !g_state.useTabs)
             return 0;
         if (pnmh->hwndFrom == g_hwndTabs && pnmh->code == NM_CUSTOMDRAW)
@@ -1864,46 +2286,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (cmd != 0)
                 SendMessageW(hwnd, WM_COMMAND, MAKEWPARAM(cmd, 0), 0);
             return 0;
-        }
-        if (pnmh->hwndFrom == g_hwndStatus && pnmh->code == NM_CUSTOMDRAW)
-        {
-            if (IsDarkMode())
-            {
-                LPNMCUSTOMDRAW lpnmcd = reinterpret_cast<LPNMCUSTOMDRAW>(lParam);
-                const COLORREF bgColor = ThemeColorStatusBackground(true);
-                const COLORREF textColor = ThemeColorStatusText(true);
-                const COLORREF borderColor = ThemeColorChromeBorder(true);
-                if (lpnmcd->dwDrawStage == CDDS_PREPAINT)
-                    return CDRF_NOTIFYITEMDRAW;
-                if (lpnmcd->dwDrawStage == CDDS_ITEMPREPAINT)
-                {
-                    HBRUSH hbr = g_hbrStatusDark ? g_hbrStatusDark : CreateSolidBrush(bgColor);
-                    FillRect(lpnmcd->hdc, &lpnmcd->rc, hbr);
-                    if (!g_hbrStatusDark && hbr)
-                        DeleteObject(hbr);
-                    SetBkMode(lpnmcd->hdc, TRANSPARENT);
-                    SetBkColor(lpnmcd->hdc, bgColor);
-                    SetTextColor(lpnmcd->hdc, textColor);
-                    wchar_t buf[256] = {};
-                    int part = static_cast<int>(lpnmcd->dwItemSpec);
-                    SendMessageW(g_hwndStatus, SB_GETTEXTW, part, reinterpret_cast<LPARAM>(buf));
-                    RECT rc = lpnmcd->rc;
-                    rc.left += 6;
-                    DrawTextW(lpnmcd->hdc, buf, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS);
-                    if (part < 3)
-                    {
-                        RECT separator = lpnmcd->rc;
-                        separator.left = separator.right - 1;
-                        HBRUSH hbrSep = CreateSolidBrush(borderColor);
-                        if (hbrSep)
-                        {
-                            FillRect(lpnmcd->hdc, &separator, hbrSep);
-                            DeleteObject(hbrSep);
-                        }
-                    }
-                    return CDRF_SKIPDEFAULT;
-                }
-            }
         }
         if (pnmh->hwndFrom == g_hwndEditor && pnmh->code == EN_SELCHANGE)
         {
@@ -1984,11 +2366,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             DeleteObject(g_hbrDialogEditDark);
             g_hbrDialogEditDark = nullptr;
         }
+        if (g_hChromeUiFont)
+        {
+            DeleteObject(g_hChromeUiFont);
+            g_hChromeUiFont = nullptr;
+        }
         if (g_hRichEditModule)
         {
             FreeLibrary(g_hRichEditModule);
             g_hRichEditModule = nullptr;
         }
+        UnloadBundledFonts();
         TabDestroyFonts();
         PostQuitMessage(0);
         return 0;
@@ -2029,6 +2417,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow)
             setProcDPI(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
 
+    LoadBundledFonts();
     LoadFontSettings();
 
     bool benchmarkOnly = false;

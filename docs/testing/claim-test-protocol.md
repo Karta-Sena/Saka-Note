@@ -1,5 +1,5 @@
-# Claim Test Protocol - Saka Note vs Microsoft Notepad
-# Protokol Uji Klaim - Saka Note vs Microsoft Notepad
+# Claim Test Protocol - Technical Standard Note vs Microsoft Notepad
+# Protokol Uji Klaim - Technical Standard Note vs Microsoft Notepad
 
 Purpose: compare performance fairly with identical test conditions.  
 Tujuan: membandingkan performa secara adil dengan kondisi uji yang sama.
@@ -94,3 +94,4 @@ Microsoft Notepad modern dapat menunjukkan perilaku single-instance pada beberap
 
 If startup time appears as `N/A`, use resource metrics (CPU/memory/handles/threads) for comparison.  
 Jika startup time terbaca `N/A`, gunakan metrik resource (CPU/memory/handles/threads) untuk komparasi.
+

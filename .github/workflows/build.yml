@@ -34,11 +34,11 @@ jobs:
       - name: Binary Size Gate
         shell: pwsh
         run: |
-          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/saka-note.exe"
+          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/technical-standard-note.exe"
           $sizeBytes = (Get-Item $exe).Length
           $limitMb = 8
           $limitBytes = $limitMb * 1MB
-          Write-Host "saka-note.exe size: $([math]::Round($sizeBytes / 1MB, 2)) MB (limit: $limitMb MB)"
+          Write-Host "technical-standard-note.exe size: $([math]::Round($sizeBytes / 1MB, 2)) MB (limit: $limitMb MB)"
           if ($sizeBytes -gt $limitBytes) {
             throw "Binary size gate failed: $sizeBytes bytes exceeds $limitBytes bytes."
           }
@@ -53,7 +53,7 @@ jobs:
         if: matrix.arch == 'x64'
         shell: pwsh
         run: |
-          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/saka-note.exe"
+          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/technical-standard-note.exe"
           & $exe --benchmark-ci
 
       - name: Collect Benchmark Report (x64)
@@ -61,7 +61,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "build-${{ matrix.arch }}/benchmark-reports" | Out-Null
-          $srcDir = Join-Path $env:LOCALAPPDATA "SakaNote\\benchmarks"
+          $srcDir = Join-Path $env:LOCALAPPDATA "TechnicalStandardNote\\benchmarks"
           if (Test-Path $srcDir) {
             $latest = Get-ChildItem $srcDir -Filter "benchmark-*.txt" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
             if ($latest) {
@@ -75,21 +75,21 @@ jobs:
       - name: Collect Setup Installer
         shell: pwsh
         run: |
-          $installer = Get-ChildItem -Path "." -File -Filter "saka-note-*-${{ matrix.arch }}.exe" |
+          $installer = Get-ChildItem -Path "." -File -Filter "technical-standard-note-*-${{ matrix.arch }}.exe" |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
           if (-not $installer) {
             throw "NSIS installer not found for architecture ${{ matrix.arch }}."
           }
-          Copy-Item $installer.FullName "build-${{ matrix.arch }}/saka-note-setup-${{ matrix.arch }}.exe" -Force
+          Copy-Item $installer.FullName "build-${{ matrix.arch }}/technical-standard-note-setup-${{ matrix.arch }}.exe" -Force
 
       - name: Create Portable Zip
         shell: pwsh
         run: |
           $stage = "build-${{ matrix.arch }}/portable-stage"
-          $zip = "build-${{ matrix.arch }}/saka-note-portable-${{ matrix.arch }}.zip"
+          $zip = "build-${{ matrix.arch }}/technical-standard-note-portable-${{ matrix.arch }}.zip"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item "build-${{ matrix.arch }}/Release/saka-note.exe" "$stage/saka-note.exe" -Force
+          Copy-Item "build-${{ matrix.arch }}/Release/technical-standard-note.exe" "$stage/technical-standard-note.exe" -Force
           Copy-Item "LICENSE" "$stage/LICENSE.txt" -Force
           Copy-Item "README.md" "$stage/README.md" -Force
           Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
@@ -97,11 +97,11 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: saka-note-${{ matrix.arch }}
+          name: technical-standard-note-${{ matrix.arch }}
           if-no-files-found: ignore
           path: |
-            build-${{ matrix.arch }}/saka-note-setup-${{ matrix.arch }}.exe
-            build-${{ matrix.arch }}/saka-note-portable-${{ matrix.arch }}.zip
+            build-${{ matrix.arch }}/technical-standard-note-setup-${{ matrix.arch }}.exe
+            build-${{ matrix.arch }}/technical-standard-note-portable-${{ matrix.arch }}.zip
             build-${{ matrix.arch }}/benchmark-reports/benchmark-*.txt
 
   release:
@@ -122,9 +122,10 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/**/saka-note-setup-*.exe
-            artifacts/**/saka-note-portable-*.zip
+            artifacts/**/technical-standard-note-setup-*.exe
+            artifacts/**/technical-standard-note-portable-*.zip
             artifacts/**/benchmark-*.txt
             release-sha256.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

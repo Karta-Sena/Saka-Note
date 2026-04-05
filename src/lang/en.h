@@ -3,7 +3,7 @@
 #include "lang.h"
 
 inline LangStrings g_langEN = {
-    L"Saka Note",
+    L"Technical Standard Note",
     L"Untitled",
 
     L"&File",
@@ -36,6 +36,9 @@ inline LangStrings g_langEN = {
     L"F&ormat",
     L"&Word Wrap",
     L"&Font...",
+    L"&Bold\tCtrl+B",
+    L"&Italic\tCtrl+I",
+    L"Stri&kethrough\tCtrl+Shift+X",
 
     L"&View",
     L"Zoom &In\tCtrl+Plus",
@@ -65,7 +68,7 @@ inline LangStrings g_langEN = {
     L"Always on &Top",
 
     L"&Help",
-    L"&About Saka Note",
+    L"&About Technical Standard Note",
     L"&Check for Updates",
     L"Run &Performance Benchmark",
 
@@ -99,7 +102,7 @@ inline LangStrings g_langEN = {
     L"Cannot open file.",
     L"Cannot save file.",
     L"Error",
-    L"Saka Note v1.3.0\n\nBuilt by Saka Studio & Engineering.\nA lightweight Win32 text editor focused on speed, stability, and clarity.\n", //\nModify by 0x2o.net",
+    L"Technical Standard Note v1.3.0\n\nBuilt by Saka Studio & Engineering.\nA lightweight Win32 text editor focused on speed, stability, and clarity.\n", //\nModify by 0x2o.net",
     L"Cannot load RichEdit control.",
     L"Close other tabs first, then disable tab mode.",
     L"The line number is beyond the total number of lines.",
@@ -135,3 +138,4 @@ inline LangStrings g_langEN = {
     L"Windows (CRLF)",
     L"Unix (LF)",
     L"Macintosh (CR)"};
+

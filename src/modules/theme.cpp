@@ -12,52 +12,88 @@
 #include "theme.h"
 #include "core/types.h"
 #include "core/globals.h"
+#include "editor.h"
 #include "resource.h"
 #include "settings.h"
 
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+
+#ifndef DWMWA_SYSTEMBACKDROP_TYPE
+#define DWMWA_SYSTEMBACKDROP_TYPE 38
+#endif
+
+#ifndef DWMWCP_ROUND
+#define DWMWCP_ROUND 2
+#endif
+
+#ifndef DWMSBT_AUTO
+#define DWMSBT_AUTO 0
+#define DWMSBT_NONE 1
+#define DWMSBT_MAINWINDOW 2
+#define DWMSBT_TRANSIENTWINDOW 3
+#define DWMSBT_TABBEDWINDOW 4
+#endif
+
 COLORREF ThemeColorEditorBackground(bool dark)
 {
-    return dark ? RGB(29, 32, 38) : GetSysColor(COLOR_WINDOW);
+    return dark ? RGB(28, 30, 34) : RGB(247, 247, 248);
 }
 
 COLORREF ThemeColorEditorText(bool dark)
 {
-    return dark ? RGB(236, 240, 246) : GetSysColor(COLOR_WINDOWTEXT);
+    return dark ? RGB(232, 235, 239) : RGB(28, 30, 34);
 }
 
 COLORREF ThemeColorStatusBackground(bool dark)
 {
-    return dark ? RGB(32, 36, 42) : GetSysColor(COLOR_BTNFACE);
+    return dark ? RGB(34, 37, 42) : RGB(242, 242, 244);
 }
 
 COLORREF ThemeColorStatusText(bool dark)
 {
-    return dark ? RGB(224, 229, 237) : GetSysColor(COLOR_BTNTEXT);
+    return dark ? RGB(214, 218, 225) : RGB(64, 69, 77);
 }
 
 COLORREF ThemeColorMenuBackground(bool dark)
 {
-    return dark ? RGB(32, 36, 42) : GetSysColor(COLOR_MENUBAR);
+    return dark ? RGB(34, 37, 42) : RGB(242, 242, 244);
 }
 
 COLORREF ThemeColorMenuHoverBackground(bool dark)
 {
-    return dark ? RGB(47, 53, 62) : GetSysColor(COLOR_MENUHILIGHT);
+    return dark ? RGB(52, 56, 64) : RGB(229, 231, 236);
 }
 
 COLORREF ThemeColorMenuText(bool dark)
 {
-    return dark ? RGB(244, 247, 252) : GetSysColor(COLOR_MENUTEXT);
+    return dark ? RGB(233, 236, 242) : RGB(44, 47, 53);
 }
 
 COLORREF ThemeColorChromeBorder(bool dark)
 {
-    return dark ? RGB(67, 74, 84) : RGB(208, 214, 223);
+    return dark ? RGB(66, 71, 80) : RGB(212, 215, 222);
 }
 
 bool SetTitleBarDark(HWND hwnd, BOOL dark)
 {
-    HMODULE hDwmapi = LoadLibraryW(L"dwmapi.dll");
+    HMODULE hDwmapi = GetModuleHandleW(L"dwmapi.dll");
+    const bool loadedNow = (hDwmapi == nullptr);
+    if (!hDwmapi)
+        hDwmapi = LoadLibraryW(L"dwmapi.dll");
     if (!hDwmapi)
         return false;
 
@@ -81,12 +117,21 @@ bool SetTitleBarDark(HWND hwnd, BOOL dark)
                 applied = true;
         }
 
-        // Keep corners visually tighter and more consistent across dialogs/windows.
-        const DWORD cornerPrefAttr = 33; // DWMWA_WINDOW_CORNER_PREFERENCE
-        const DWORD cornerPrefSmallRound = 3; // DWMWCP_ROUNDSMALL
-        dwmSetWindowAttribute(hwnd, cornerPrefAttr, &cornerPrefSmallRound, sizeof(cornerPrefSmallRound));
+        const DWORD cornerPref = DWMWCP_ROUND;
+        dwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPref, sizeof(cornerPref));
+
+        const DWORD backdropType = g_state.useTabs ? DWMSBT_TABBEDWINDOW : DWMSBT_MAINWINDOW;
+        dwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
+
+        const COLORREF captionColor = dark ? RGB(32, 35, 40) : RGB(242, 242, 244);
+        const COLORREF titleTextColor = dark ? RGB(244, 246, 250) : RGB(35, 38, 43);
+        const COLORREF borderColor = ThemeColorChromeBorder(dark != FALSE);
+        dwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &captionColor, sizeof(captionColor));
+        dwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &titleTextColor, sizeof(titleTextColor));
+        dwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &borderColor, sizeof(borderColor));
     }
-    FreeLibrary(hDwmapi);
+    if (loadedNow)
+        FreeLibrary(hDwmapi);
     return applied;
 }
 
@@ -185,16 +230,16 @@ LRESULT CALLBACK StatusSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                 DeleteObject(hbrBorder);
             }
 
-            NONCLIENTMETRICSW ncm = {};
-            ncm.cbSize = sizeof(ncm);
-            SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
-            HFONT hFont = CreateFontIndirectW(&ncm.lfStatusFont);
+            HFONT hFont = reinterpret_cast<HFONT>(SendMessageW(hwnd, WM_GETFONT, 0, 0));
+            if (!hFont)
+                hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             HFONT hOldFont = reinterpret_cast<HFONT>(SelectObject(hdc, hFont));
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, textColor);
             int parts[4];
             int partCount = static_cast<int>(SendMessageW(hwnd, SB_GETPARTS, 4, reinterpret_cast<LPARAM>(parts)));
-            int left = 6;
+            const int horizontalPad = 8;
+            int left = horizontalPad;
             for (int i = 0; i < partCount && i < 4; i++)
             {
                 const int right = (parts[i] == -1) ? rc.right : parts[i];
@@ -213,10 +258,9 @@ LRESULT CALLBACK StatusSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                         DeleteObject(hbrSep);
                     }
                 }
-                left = right + 6;
+                left = right + horizontalPad;
             }
             SelectObject(hdc, hOldFont);
-            DeleteObject(hFont);
             EndPaint(hwnd, &ps);
             return 0;
         }
@@ -250,41 +294,36 @@ void ApplyTheme()
 #pragma GCC diagnostic pop
 #endif
     }
+    if (g_hbrStatusDark)
+    {
+        DeleteObject(g_hbrStatusDark);
+        g_hbrStatusDark = nullptr;
+    }
+    if (g_hbrMenuDark)
+    {
+        DeleteObject(g_hbrMenuDark);
+        g_hbrMenuDark = nullptr;
+    }
+    if (g_hbrDialogDark)
+    {
+        DeleteObject(g_hbrDialogDark);
+        g_hbrDialogDark = nullptr;
+    }
+    if (g_hbrDialogEditDark)
+    {
+        DeleteObject(g_hbrDialogEditDark);
+        g_hbrDialogEditDark = nullptr;
+    }
     if (dark)
     {
-        if (!g_hbrStatusDark)
-            g_hbrStatusDark = CreateSolidBrush(ThemeColorStatusBackground(true));
-        if (!g_hbrMenuDark)
-            g_hbrMenuDark = CreateSolidBrush(ThemeColorMenuBackground(true));
-        if (!g_hbrDialogDark)
-            g_hbrDialogDark = CreateSolidBrush(ThemeColorMenuBackground(true));
-        if (!g_hbrDialogEditDark)
-            g_hbrDialogEditDark = CreateSolidBrush(ThemeColorEditorBackground(true));
-    }
-    else
-    {
-        if (g_hbrStatusDark)
-        {
-            DeleteObject(g_hbrStatusDark);
-            g_hbrStatusDark = nullptr;
-        }
-        if (g_hbrMenuDark)
-        {
-            DeleteObject(g_hbrMenuDark);
-            g_hbrMenuDark = nullptr;
-        }
-        if (g_hbrDialogDark)
-        {
-            DeleteObject(g_hbrDialogDark);
-            g_hbrDialogDark = nullptr;
-        }
-        if (g_hbrDialogEditDark)
-        {
-            DeleteObject(g_hbrDialogEditDark);
-            g_hbrDialogEditDark = nullptr;
-        }
+        g_hbrStatusDark = CreateSolidBrush(ThemeColorStatusBackground(true));
+        g_hbrMenuDark = CreateSolidBrush(ThemeColorMenuBackground(true));
+        g_hbrDialogDark = CreateSolidBrush(ThemeColorMenuBackground(true));
+        g_hbrDialogEditDark = CreateSolidBrush(ThemeColorEditorBackground(true));
     }
     ApplyThemeToWindowTree(g_hwndMain);
+    if (g_hwndTabs)
+        SetWindowTheme(g_hwndTabs, dark ? L"" : L"Explorer", nullptr);
     COLORREF bgColor = ThemeColorEditorBackground(dark != FALSE);
     COLORREF textColor = ThemeColorEditorText(dark != FALSE);
     SendMessageW(g_hwndEditor, EM_SETBKGNDCOLOR, 0, bgColor);
@@ -294,14 +333,16 @@ void ApplyTheme()
     cf.crTextColor = textColor;
     SendMessageW(g_hwndEditor, EM_SETCHARFORMAT, SCF_ALL, reinterpret_cast<LPARAM>(&cf));
     SendMessageW(g_hwndEditor, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&cf));
+    ApplyEditorScrollbarChrome();
     SendMessageW(g_hwndStatus, SB_SETBKCOLOR, 0, dark ? ThemeColorStatusBackground(true) : CLR_DEFAULT);
     if (g_hwndFindDlg)
         ApplyThemeToWindowTree(g_hwndFindDlg);
     CheckMenuItem(GetMenu(g_hwndMain), IDM_VIEW_DARKMODE, MF_BYCOMMAND | (dark ? MF_CHECKED : MF_UNCHECKED));
-    InvalidateRect(g_hwndEditor, nullptr, TRUE);
-    InvalidateRect(g_hwndTabs, nullptr, TRUE);
-    InvalidateRect(g_hwndStatus, nullptr, TRUE);
-    InvalidateRect(g_hwndMain, nullptr, TRUE);
+    InvalidateRect(g_hwndEditor, nullptr, FALSE);
+    InvalidateRect(g_hwndCommandBar, nullptr, FALSE);
+    InvalidateRect(g_hwndTabs, nullptr, FALSE);
+    InvalidateRect(g_hwndStatus, nullptr, FALSE);
+    InvalidateRect(g_hwndMain, nullptr, FALSE);
     DrawMenuBar(g_hwndMain);
 }
 

@@ -16,6 +16,7 @@ extern HWND g_hwndMain;
 extern HWND g_hwndEditor;
 extern HWND g_hwndStatus;
 extern HWND g_hwndTabs;
+extern HWND g_hwndCommandBar;
 extern HWND g_hwndFindDlg;
 extern HACCEL g_hAccel;
 extern AppState g_state;

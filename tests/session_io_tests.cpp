@@ -19,7 +19,7 @@ std::wstring TempSessionPath()
     DWORD len = GetTempPathW(MAX_PATH, tempDir);
     std::wstring root = (len > 0 && len < MAX_PATH) ? std::wstring(tempDir) : std::wstring(L".\\");
     wchar_t suffix[64] = {};
-    wsprintfW(suffix, L"saka-note-session-io-test-%lu.bin", GetCurrentProcessId());
+    wsprintfW(suffix, L"technical-standard-note-session-io-test-%lu.bin", GetCurrentProcessId());
     return root + suffix;
 }
 }
@@ -95,3 +95,4 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
     return RunSessionIoTests();
 }
+

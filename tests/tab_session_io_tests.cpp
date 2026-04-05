@@ -19,7 +19,7 @@ std::wstring TempPathForTest()
     const DWORD len = GetTempPathW(MAX_PATH, tempDir);
     std::wstring root = (len > 0 && len < MAX_PATH) ? std::wstring(tempDir) : std::wstring(L".\\");
     wchar_t suffix[64] = {};
-    wsprintfW(suffix, L"saka-note-tab-session-io-test-%lu.bin", GetCurrentProcessId());
+    wsprintfW(suffix, L"technical-standard-note-tab-session-io-test-%lu.bin", GetCurrentProcessId());
     return root + suffix;
 }
 }
@@ -146,3 +146,4 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
     return RunTabSessionIoTests();
 }
+

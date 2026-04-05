@@ -12,11 +12,11 @@
 #include <string>
 #include <deque>
 
-#define APP_NAME L"Saka Note"
+#define APP_NAME L"Technical Standard Note"
 #define APP_VERSION L"1.3.0"
-#define APP_GITHUB_OWNER L"Karta-Sena"
-#define APP_GITHUB_REPO L"Saka-Note"
-#define APP_REPOSITORY_URL L"https://github.com/Karta-Sena/Saka-Note"
+#define APP_GITHUB_OWNER L"wisesakarta"
+#define APP_GITHUB_REPO L"technical-standard-note"
+#define APP_REPOSITORY_URL L"https://github.com/wisesakarta/technical-standard-note"
 #define ZOOM_MIN 25
 #define ZOOM_MAX 500
 #define ZOOM_DEFAULT 100
@@ -119,7 +119,7 @@ struct AppState
     bool showStatusBar = true;
     Theme theme = Theme::System;
     int fontSize = 16;
-    std::wstring fontName = L"Consolas";
+    std::wstring fontName = L"Berkeley Mono Condensed";
     int fontWeight = FW_NORMAL;
     bool fontItalic = false;
     bool fontUnderline = false;
@@ -147,3 +147,4 @@ typedef void(WINAPI *fnAllowDarkModeForApp)(BOOL allow);
 typedef PreferredAppMode(WINAPI *fnSetPreferredAppMode)(PreferredAppMode appMode);
 typedef void(WINAPI *fnFlushMenuThemes)();
 typedef void(WINAPI *fnRefreshImmersiveColorPolicyState)();
+

@@ -53,8 +53,11 @@ void UpdateMenuStrings()
     HMENU hFormatMenu = GetSubMenu(hMenu, 2);
     if (hFormatMenu)
     {
-        ModifyMenuW(hFormatMenu, 0, MF_BYPOSITION | MF_STRING, IDM_FORMAT_WORDWRAP, lang.menuWordWrap.c_str());
-        ModifyMenuW(hFormatMenu, 1, MF_BYPOSITION | MF_STRING, IDM_FORMAT_FONT, lang.menuFont.c_str());
+        ModifyMenuW(hFormatMenu, IDM_FORMAT_WORDWRAP, MF_BYCOMMAND | MF_STRING, IDM_FORMAT_WORDWRAP, lang.menuWordWrap.c_str());
+        ModifyMenuW(hFormatMenu, IDM_FORMAT_FONT, MF_BYCOMMAND | MF_STRING, IDM_FORMAT_FONT, lang.menuFont.c_str());
+        ModifyMenuW(hFormatMenu, IDM_FORMAT_BOLD, MF_BYCOMMAND | MF_STRING, IDM_FORMAT_BOLD, lang.menuBold.c_str());
+        ModifyMenuW(hFormatMenu, IDM_FORMAT_ITALIC, MF_BYCOMMAND | MF_STRING, IDM_FORMAT_ITALIC, lang.menuItalic.c_str());
+        ModifyMenuW(hFormatMenu, IDM_FORMAT_STRIKETHROUGH, MF_BYCOMMAND | MF_STRING, IDM_FORMAT_STRIKETHROUGH, lang.menuStrikethrough.c_str());
     }
 
     HMENU hViewMenu = GetSubMenu(hMenu, 3);

@@ -56,6 +56,8 @@ bool TabCompactDocumentTextIfEligible(std::vector<DocumentTabState> &documents,
     doc.sourceBytes = bytes;
     doc.largeFileMode = doc.largeFileMode || ShouldUseLargeDocumentMode(doc.sourceBytes);
     std::wstring().swap(doc.text);
+    std::string().swap(doc.richText);
+    doc.hasRichText = false;
     doc.needsReloadFromDisk = true;
     return true;
 }
