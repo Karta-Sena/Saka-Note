@@ -12,6 +12,10 @@
 #include "settings.h"
 #include "theme.h"
 #include "lang/lang.h"
+#include "background.h"
+#include "design_system.h"
+#include "resource.h"
+#include "tab_layout.h"
 #include <commdlg.h>
 #include <richedit.h>
 #include <algorithm>
@@ -19,9 +23,12 @@
 
 namespace
 {
-constexpr COLORREF kDialogDarkBg = RGB(45, 45, 45);
-constexpr COLORREF kDialogDarkEditBg = RGB(30, 30, 30);
-constexpr COLORREF kDialogDarkText = RGB(240, 240, 240);
+constexpr COLORREF kDialogDarkBg = DesignSystem::Color::kDarkBg;
+constexpr COLORREF kDialogDarkEditBg = DesignSystem::Color::kDarkBg;
+constexpr COLORREF kDialogDarkText = DesignSystem::Color::kDarkInk;
+
+INT_PTR HandleDialogPaint(HWND hDlg);
+INT_PTR HandleDialogCtlColor(UINT msg, WPARAM wParam);
 
 int ScaleDialogPx(int px)
 {
@@ -41,8 +48,8 @@ int MeasureDialogTextWidth(const std::wstring &text)
     if (!hdc)
         return 0;
 
-    HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-    HGDIOBJ oldFont = SelectObject(hdc, hFont);
+    HFONT hFont = TabGetRegularFont();
+    HGDIOBJ oldFont = SelectObject(hdc, hFont ? hFont : TabGetRegularFont());
     SIZE size{};
     GetTextExtentPoint32W(hdc, text.c_str(), static_cast<int>(text.size()), &size);
     SelectObject(hdc, oldFont);
@@ -52,13 +59,23 @@ int MeasureDialogTextWidth(const std::wstring &text)
 
 UINT_PTR CALLBACK FontDialogHookProc(HWND hDlg, UINT msg, WPARAM, LPARAM)
 {
-    if (msg == WM_INITDIALOG)
-    {
-        HWND hRoot = GetAncestor(hDlg, GA_ROOT);
-        if (!hRoot)
-            hRoot = hDlg;
-        SetTitleBarDark(hRoot, IsDarkMode() ? TRUE : FALSE);
-    }
+    if (msg != WM_INITDIALOG)
+        return FALSE;
+
+    HWND hRoot = GetAncestor(hDlg, GA_ROOT);
+    if (!hRoot)
+        hRoot = hDlg;
+
+    SetTitleBarDark(hRoot, IsDarkMode() ? TRUE : FALSE);
+    ApplyThemeToWindowTree(hRoot);
+
+    HFONT hUiFont = TabGetRegularFont();
+    if (!hUiFont)
+        hUiFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+    for (HWND h = GetWindow(hRoot, GW_CHILD); h; h = GetWindow(h, GW_HWNDNEXT))
+        SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(hUiFont), TRUE);
+
     return FALSE;
 }
 
@@ -120,6 +137,95 @@ INT_PTR HandleDialogCtlColor(UINT msg, WPARAM wParam)
     SetBkMode(hdc, TRANSPARENT);
     SetBkColor(hdc, kDialogDarkBg);
     return reinterpret_cast<INT_PTR>(g_hbrDialogDark ? g_hbrDialogDark : GetStockObject(BLACK_BRUSH));
+}
+
+static void FillSolidRectDc(HDC hdc, const RECT &rc, COLORREF color)
+{
+    HBRUSH hBrush = CreateSolidBrush(color);
+    FillRect(hdc, &rc, hBrush);
+    DeleteObject(hBrush);
+}
+
+INT_PTR HandleAboutPaint(HWND hWnd)
+{
+    PAINTSTRUCT ps{};
+    HDC hdc = BeginPaint(hWnd, &ps);
+
+    RECT rcClient{};
+    GetClientRect(hWnd, &rcClient);
+
+    const bool dark = IsDarkMode();
+    const TabPaintPalette palette = GetTabPaintPalette(dark);
+    
+    FillSolidRectDc(hdc, rcClient, palette.stripBg);
+
+    if (EnsureBackgroundGraphicsReady())
+    {
+        Gdiplus::Graphics graphics(hdc);
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        graphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+
+        Gdiplus::Image* logo = LoadImageFromResource(GetModuleHandleW(nullptr), IDR_LOGO_WORDMARK, L"RCDATA");
+        if (logo)
+        {
+            float imgW = static_cast<float>(logo->GetWidth());
+            float imgH = static_cast<float>(logo->GetHeight());
+            
+            float targetW = static_cast<float>(ScaleDialogPx(200));
+            float targetH = (imgH / imgW) * targetW;
+            
+            float x = (static_cast<float>(rcClient.right) - targetW) / 2.0f;
+            float y = static_cast<float>(ScaleDialogPx(40));
+
+            graphics.DrawImage(logo, x, y, targetW, targetH);
+            delete logo;
+        }
+    }
+
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, palette.textColor);
+
+    HFONT hFontReg = TabGetRegularFont();
+
+    HGDIOBJ oldFont = SelectObject(hdc, hFontReg ? hFontReg : TabGetRegularFont());
+
+    std::wstring verText = L"v" + std::wstring(APP_VERSION);
+    RECT rcVer = { 0, ScaleDialogPx(130), rcClient.right, ScaleDialogPx(155) };
+    DrawTextW(hdc, verText.c_str(), -1, &rcVer, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    std::wstring copyText = L"Crafted with discipline by wisesakarta";
+    RECT rcCopy = { 0, ScaleDialogPx(160), rcClient.right, ScaleDialogPx(185) };
+    DrawTextW(hdc, copyText.c_str(), -1, &rcCopy, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    std::wstring subText = L"Clarity. Function. Detail.";
+    RECT rcSub = { 0, ScaleDialogPx(180), rcClient.right, ScaleDialogPx(205) };
+    DrawTextW(hdc, subText.c_str(), -1, &rcSub, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    SelectObject(hdc, oldFont);
+    EndPaint(hWnd, &ps);
+    return 0;
+}
+
+LRESULT CALLBACK AboutWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_CREATE:
+        SetTitleBarDark(hWnd, IsDarkMode());
+        return 0;
+    case WM_PAINT:
+        HandleAboutPaint(hWnd);
+        return 0;
+    case WM_LBUTTONDOWN:
+    case WM_KEYDOWN:
+        DestroyWindow(hWnd);
+        return 0;
+    case WM_CLOSE:
+        DestroyWindow(hWnd);
+        return 0;
+    }
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
 }
@@ -276,7 +382,7 @@ void EditFind()
                                     g_hwndMain, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (g_hwndFindDlg)
     {
-        HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        HFONT hFont = TabGetRegularFont();
         CreateWindowExW(0, L"STATIC", lang.dialogFindLabel.c_str(), WS_CHILD | WS_VISIBLE, 10, 12, 45, 16, g_hwndFindDlg, nullptr, nullptr, nullptr);
         CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_state.findText.c_str(), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 60, 10, 230, 20, g_hwndFindDlg, reinterpret_cast<HMENU>(1001), nullptr, nullptr);
         CreateWindowExW(0, L"BUTTON", lang.dialogFindNext.c_str(), WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 300, 10, 100, 22, g_hwndFindDlg, reinterpret_cast<HMENU>(1), nullptr, nullptr);
@@ -313,7 +419,7 @@ void EditReplace()
                                     g_hwndMain, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (g_hwndFindDlg)
     {
-        HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        HFONT hFont = TabGetRegularFont();
         CreateWindowExW(0, L"STATIC", lang.dialogFindLabel.c_str(), WS_CHILD | WS_VISIBLE, 10, 12, 45, 16, g_hwndFindDlg, nullptr, nullptr, nullptr);
         CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_state.findText.c_str(), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 60, 10, 230, 20, g_hwndFindDlg, reinterpret_cast<HMENU>(1001), nullptr, nullptr);
         CreateWindowExW(0, L"STATIC", lang.dialogReplaceLabel.c_str(), WS_CHILD | WS_VISIBLE, 10, 40, 50, 16, g_hwndFindDlg, nullptr, nullptr, nullptr);
@@ -385,7 +491,7 @@ void EditGoto()
                                 g_hwndMain, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (hDlg)
     {
-        HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        HFONT hFont = TabGetRegularFont();
         CreateWindowExW(0, L"STATIC", lang.dialogLineNumber.c_str(), WS_CHILD | WS_VISIBLE, 15, 15, 100, 16, hDlg, nullptr, nullptr, nullptr);
 
         DWORD start = 0;
@@ -434,8 +540,9 @@ void FormatFont()
     cf.lStructSize = sizeof(cf);
     cf.hwndOwner = g_hwndMain;
     cf.lpLogFont = &lf;
-    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_FORCEFONTEXIST | CF_BOTH | CF_ENABLEHOOK;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_FORCEFONTEXIST | CF_BOTH | CF_EFFECTS | CF_ENABLEHOOK;
     cf.lpfnHook = FontDialogHookProc;
+
     if (ChooseFontW(&cf))
     {
         g_state.fontName = lf.lfFaceName;
@@ -522,7 +629,9 @@ void ViewTransparency()
     const int cancelX = clientW - margin - buttonW;
     const int okX = cancelX - buttonGap - buttonW;
 
-    HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    HFONT hFont = TabGetRegularFont();
+    if (!hFont) hFont = TabGetRegularFont();
+    
     CreateWindowExW(0, L"STATIC", lang.dialogOpacityLabel.c_str(), WS_CHILD | WS_VISIBLE, margin, labelY, labelW, labelH, hDlg, nullptr, nullptr, nullptr);
     HWND hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", buf, WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_AUTOHSCROLL | ES_RIGHT,
                                  inputX, rowY, inputW, inputH, hDlg, reinterpret_cast<HMENU>(1001), nullptr, nullptr);
@@ -588,5 +697,47 @@ void ViewTransparency()
 void HelpAbout()
 {
     const auto &lang = GetLangStrings();
-    MessageBoxW(g_hwndMain, lang.msgAbout.c_str(), lang.appName.c_str(), MB_ICONINFORMATION);
+    const wchar_t* clsName = L"SakaAboutBox";
+
+    static bool clsRegistered = false;
+    if (!clsRegistered)
+    {
+        WNDCLASSEXW wc;
+        ZeroMemory(&wc, sizeof(wc));
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = AboutWndProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = clsName;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        RegisterClassExW(&wc);
+        clsRegistered = true;
+    }
+
+    int winW = ScaleDialogPx(380);
+    int winH = ScaleDialogPx(260);
+
+    RECT rcMain;
+    GetWindowRect(g_hwndMain, &rcMain);
+    int x = rcMain.left + (rcMain.right - rcMain.left - winW) / 2;
+    int y = rcMain.top + (rcMain.bottom - rcMain.top - winH) / 2;
+
+    HWND hAbout = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_DLGMODALFRAME, clsName, lang.menuAbout.c_str(),
+                                  WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                                  x, y, winW, winH, g_hwndMain, nullptr, GetModuleHandleW(nullptr), nullptr);
+    
+    if (hAbout)
+    {
+        EnableWindow(g_hwndMain, FALSE);
+        MSG msg;
+        while (IsWindow(hAbout))
+        {
+            if (GetMessageW(&msg, nullptr, 0, 0))
+            {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        EnableWindow(g_hwndMain, TRUE);
+        SetForegroundWindow(g_hwndMain);
+    }
 }

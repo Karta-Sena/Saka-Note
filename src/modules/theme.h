@@ -24,3 +24,20 @@ COLORREF ThemeColorMenuBackground(bool dark);
 COLORREF ThemeColorMenuHoverBackground(bool dark);
 COLORREF ThemeColorMenuText(bool dark);
 COLORREF ThemeColorChromeBorder(bool dark);
+
+struct TabPaintPalette
+{
+    COLORREF stripBg;
+    COLORREF stripBorder;
+    COLORREF activeBg;
+    COLORREF inactiveBg;
+    COLORREF hoverBg;
+    COLORREF borderColor;
+    COLORREF textColor;
+    COLORREF activeTextColor;
+    COLORREF closeColor;
+    COLORREF closeHoverBg;
+    COLORREF closeHoverFg;
+};
+
+TabPaintPalette GetTabPaintPalette(bool dark);

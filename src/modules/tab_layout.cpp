@@ -7,6 +7,7 @@
 #include "tab_layout.h"
 
 #include "core/globals.h"
+#include "design_system.h"
 
 #include <commctrl.h>
 #include <algorithm>
@@ -85,19 +86,19 @@ void TabRefreshVisualMetrics()
     LOGFONTW baseLf{};
     if (!SystemParametersInfoW(SPI_GETICONTITLELOGFONT, sizeof(baseLf), &baseLf, 0))
     {
-        baseLf.lfHeight = -MulDiv(9, g_tabsDpi, 72);
-        wcscpy_s(baseLf.lfFaceName, L"Segoe UI");
+        baseLf.lfHeight = -MulDiv(DesignSystem::kChromeFontPointSize, g_tabsDpi, 72);
+        wcscpy_s(baseLf.lfFaceName, DesignSystem::kUiFontPrimary);
         baseLf.lfWeight = FW_NORMAL;
     }
-    baseLf.lfHeight = -MulDiv(9, g_tabsDpi, 72);
+    baseLf.lfHeight = -MulDiv(DesignSystem::kChromeFontPointSize, g_tabsDpi, 72);
     baseLf.lfWeight = FW_NORMAL;
     baseLf.lfQuality = CLEARTYPE_QUALITY;
-    wcscpy_s(baseLf.lfFaceName, L"Segoe UI");
+    wcscpy_s(baseLf.lfFaceName, DesignSystem::kUiFontPrimary);
 
     g_hTabFontRegular = CreateFontIndirectW(&baseLf);
     if (!g_hTabFontRegular)
     {
-        wcscpy_s(baseLf.lfFaceName, L"Segoe UI");
+        wcscpy_s(baseLf.lfFaceName, DesignSystem::kUiFontFallback);
         g_hTabFontRegular = CreateFontIndirectW(&baseLf);
     }
 
@@ -106,13 +107,20 @@ void TabRefreshVisualMetrics()
     g_hTabFontActive = CreateFontIndirectW(&activeLf);
     if (!g_hTabFontActive)
     {
-        wcscpy_s(activeLf.lfFaceName, L"Segoe UI");
+        wcscpy_s(activeLf.lfFaceName, DesignSystem::kUiFontFallback);
         g_hTabFontActive = CreateFontIndirectW(&activeLf);
     }
 
     HFONT effectiveFont = g_hTabFontRegular ? g_hTabFontRegular : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
     SendMessageW(g_hwndTabs, WM_SETFONT, reinterpret_cast<WPARAM>(effectiveFont), TRUE);
-    SendMessageW(g_hwndTabs, TCM_SETPADDING, 0, MAKELPARAM(TabScalePx(14), TabScalePx(5)));
+    SendMessageW(g_hwndTabs,
+                 TCM_SETPADDING,
+                 0,
+                 MAKELPARAM(TabScalePx(DesignSystem::kTabInnerPaddingHPx), TabScalePx(DesignSystem::kTabInnerPaddingVPx)));
+    SendMessageW(g_hwndTabs,
+                 TCM_SETITEMSIZE,
+                 0,
+                 MAKELPARAM(TabScalePx(DesignSystem::kTabFixedWidthPx), TabScalePx(DesignSystem::kChromeBandHeightPx)));
 }
 
 HFONT TabGetRegularFont()

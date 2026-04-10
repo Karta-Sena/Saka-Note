@@ -12,6 +12,7 @@
 #include "file.h"
 #include "ui.h"
 #include "settings.h"
+#include "tab_layout.h"
 #include "resource.h"
 #include "lang/lang.h"
 #include <commdlg.h>
@@ -261,7 +262,10 @@ HWND CreateHiddenBenchmarkEditor()
 
     ConfigureEditorControl(hwnd);
     SendMessageW(hwnd, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(-1));
-    SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), FALSE);
+    HFONT hFont = g_state.hFont ? g_state.hFont : TabGetRegularFont();
+    if (!hFont)
+        hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
     return hwnd;
 }
 
@@ -991,4 +995,3 @@ void ViewAlwaysOnTop()
     SetWindowPos(g_hwndMain, g_state.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     SaveFontSettings();
 }
-

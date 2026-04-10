@@ -118,8 +118,9 @@ struct AppState
     int zoomLevel = ZOOM_DEFAULT;
     bool showStatusBar = true;
     Theme theme = Theme::System;
+    bool premiumHeaderEnabled = false;
     int fontSize = 16;
-    std::wstring fontName = L"Berkeley Mono Condensed";
+    std::wstring fontName = L"Akkurat Mono LL";
     int fontWeight = FW_NORMAL;
     bool fontItalic = false;
     bool fontUnderline = false;

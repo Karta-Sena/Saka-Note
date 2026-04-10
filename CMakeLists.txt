@@ -49,8 +49,12 @@ add_executable(technical-standard-note WIN32
     src/modules/tab_layout.cpp
     src/modules/tab_model_ops.cpp
     src/modules/tab_session_io.cpp
+    src/modules/tab_spin_chrome.cpp
     src/modules/update_check.cpp
     src/modules/menu.cpp
+    src/modules/graphics_engine.cpp
+    src/modules/premium_header.cpp
+    src/modules/premium_orchestrator.cpp
     src/modules/settings.cpp
     src/notepad.rc
 )
@@ -71,10 +75,16 @@ target_link_libraries(technical-standard-note PRIVATE
     dwmapi
     uxtheme
     winhttp
+    d2d1
+    dwrite
 )
 
 set(TECHNICAL_STANDARD_NOTE_FONT_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets/fonts")
 set(TECHNICAL_STANDARD_NOTE_BUNDLED_FONT_FILES
+    "AkkuratMonoLL-Regular.ttf"
+    "AkkuratMonoLL-Bold.ttf"
+    "AkkuratMonoLL-Italic.ttf"
+    "AkkuratMonoLL-BoldItalic.ttf"
     "Berkeley Mono Condensed.ttf"
     "Berkeley Mono Condensed Bold.ttf"
     "Berkeley Mono Condensed Oblique.ttf"
@@ -199,4 +209,3 @@ set(CPACK_NSIS_MENU_LINKS
 )
 
 include(CPack)
-

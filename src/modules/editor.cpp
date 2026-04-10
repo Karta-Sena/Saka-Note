@@ -12,6 +12,7 @@
 #include "theme.h"
 #include "ui.h"
 #include "background.h"
+#include "design_system.h"
 #include "resource.h"
 #include <richedit.h>
 #include <commctrl.h>
@@ -126,7 +127,7 @@ static void ApplyFlatScrollbarStyle(HWND hwnd)
     const bool dark = IsDarkMode();
     const int barThickness = ScaleEditorPx(14);
     const int thumbExtent = ScaleEditorPx(26);
-    const COLORREF trackColor = dark ? RGB(22, 25, 31) : RGB(236, 237, 240);
+    const COLORREF trackColor = dark ? RGB(0, 0, 0) : RGB(255, 255, 255);
 
     FlatSB_SetScrollProp(hwnd, WSB_PROP_VSTYLE, FSB_FLAT_MODE, FALSE);
     FlatSB_SetScrollProp(hwnd, WSB_PROP_HSTYLE, FSB_FLAT_MODE, FALSE);
@@ -468,14 +469,37 @@ void ApplyFont()
     if (hdc)
         ReleaseDC(g_hwndMain, hdc);
     int height = -MulDiv(size, (dpiY > 0) ? dpiY : 96, 72);
-    g_state.hFont = CreateFontW(height, 0, 0, 0, g_state.fontWeight, g_state.fontItalic, g_state.fontUnderline, FALSE,
-                                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                                DEFAULT_PITCH | FF_DONTCARE, g_state.fontName.c_str());
+    auto createWithFace = [&](const wchar_t *face) -> HFONT
+    {
+        return CreateFontW(height, 0, 0, 0, g_state.fontWeight, g_state.fontItalic, g_state.fontUnderline, FALSE,
+                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                           DEFAULT_PITCH | FF_DONTCARE, face);
+    };
+
+    g_state.hFont = createWithFace(g_state.fontName.c_str());
+    if (!g_state.hFont && lstrcmpiW(g_state.fontName.c_str(), DesignSystem::kUiFontPrimary) != 0)
+        g_state.hFont = createWithFace(DesignSystem::kUiFontPrimary);
+    if (!g_state.hFont && lstrcmpiW(g_state.fontName.c_str(), DesignSystem::kUiFontFallback) != 0)
+        g_state.hFont = createWithFace(DesignSystem::kUiFontFallback);
+    if (!g_state.hFont)
+        g_state.hFont = createWithFace(L"Consolas");
+    if (!g_state.hFont)
+        return;
     SendMessageW(g_hwndEditor, WM_SETFONT, reinterpret_cast<WPARAM>(g_state.hFont), TRUE);
-    COLORREF textColor = IsDarkMode() ? RGB(255, 255, 255) : GetSysColor(COLOR_WINDOWTEXT);
+    COLORREF textColor = ThemeColorEditorText(IsDarkMode());
     CHARFORMAT2W cf = {};
     cf.cbSize = sizeof(cf);
-    cf.dwMask = CFM_COLOR;
+    cf.dwMask = CFM_COLOR | CFM_FACE | CFM_SIZE | CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_CHARSET;
+    cf.dwEffects = 0;
+    if (g_state.fontWeight >= FW_BOLD)
+        cf.dwEffects |= CFE_BOLD;
+    if (g_state.fontItalic)
+        cf.dwEffects |= CFE_ITALIC;
+    if (g_state.fontUnderline)
+        cf.dwEffects |= CFE_UNDERLINE;
+    cf.yHeight = std::max(1, size) * 20;
+    cf.bCharSet = DEFAULT_CHARSET;
+    wcsncpy_s(cf.szFaceName, g_state.fontName.c_str(), _TRUNCATE);
     cf.crTextColor = textColor;
     SendMessageW(g_hwndEditor, EM_SETCHARFORMAT, SCF_ALL, reinterpret_cast<LPARAM>(&cf));
     SendMessageW(g_hwndEditor, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&cf));

@@ -7,6 +7,8 @@
 
 #include "ui.h"
 #include "core/globals.h"
+#include "design_system.h"
+#include "tab_layout.h"
 #include "lang/lang.h"
 #include "editor.h"
 #include "file.h"
@@ -81,7 +83,7 @@ void SetupStatusBarParts()
     const auto &lang = GetLangStrings();
     HDC hdc = GetDC(g_hwndStatus);
     HFONT hFont = reinterpret_cast<HFONT>(SendMessageW(g_hwndStatus, WM_GETFONT, 0, 0));
-    HFONT old = reinterpret_cast<HFONT>(SelectObject(hdc, hFont ? hFont : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT))));
+    HFONT old = reinterpret_cast<HFONT>(SelectObject(hdc, hFont ? hFont : TabGetRegularFont()));
     auto textW = [&](const std::wstring &s)
     {
         SIZE sz{};
@@ -124,7 +126,7 @@ void ResizeControls()
 
     if (g_hwndCommandBar)
     {
-        const int commandBarHeight = std::max(30, ScaleMainPx(34));
+        const int commandBarHeight = std::max(30, ScaleMainPx(DesignSystem::kChromeBandHeightPx));
         ShowWindow(g_hwndCommandBar, SW_SHOW);
         MoveWindow(g_hwndCommandBar, 0, 0, rc.right, commandBarHeight, TRUE);
         topOffset += commandBarHeight;
@@ -134,14 +136,10 @@ void ResizeControls()
     int editorTop = topOffset;
     if (g_hwndTabs && g_state.useTabs)
     {
-        tabsH = std::max(30, ScaleMainPx(36));
+        tabsH = std::max(30, ScaleMainPx(DesignSystem::kChromeBandHeightPx));
         ShowWindow(g_hwndTabs, SW_SHOW);
         MoveWindow(g_hwndTabs, 0, topOffset, rc.right, tabsH, TRUE);
-
-        RECT displayRect{0, 0, rc.right, tabsH};
-        // Anchor editor to tab display area so active tab can visually attach to page.
-        TabCtrl_AdjustRect(g_hwndTabs, FALSE, &displayRect);
-        editorTop = topOffset + std::max(0, static_cast<int>(displayRect.top) - 1);
+        editorTop = topOffset + tabsH;
     }
     else if (g_hwndTabs)
     {

@@ -24,6 +24,7 @@
 #define SHOW_STATUS_BAR_VALUE L"ShowStatusBar"
 #define ZOOM_LEVEL_VALUE L"ZoomLevel"
 #define THEME_VALUE L"Theme"
+#define PREMIUM_HEADER_ENABLED_VALUE L"PremiumHeaderEnabled"
 #define WINDOW_OPACITY_VALUE L"WindowOpacity"
 #define BG_ENABLED_VALUE L"BgEnabled"
 #define BG_IMAGE_PATH_VALUE L"BgImagePath"
@@ -193,6 +194,8 @@ void LoadFontSettings()
             if (dwordValue <= static_cast<DWORD>(Theme::Dark))
                 g_state.theme = static_cast<Theme>(dwordValue);
         }
+        if (ReadDwordValue(hKey, PREMIUM_HEADER_ENABLED_VALUE, dwordValue))
+            g_state.premiumHeaderEnabled = (dwordValue != 0);
 
         if (ReadDwordValue(hKey, WINDOW_OPACITY_VALUE, dwordValue))
             g_state.windowOpacity = static_cast<BYTE>(std::clamp(static_cast<int>(dwordValue), MIN_WINDOW_OPACITY, 255));
@@ -272,6 +275,7 @@ void SaveFontSettings()
         WriteDwordValue(hKey, SHOW_STATUS_BAR_VALUE, g_state.showStatusBar ? 1 : 0);
         WriteDwordValue(hKey, ZOOM_LEVEL_VALUE, static_cast<DWORD>(g_state.zoomLevel));
         WriteDwordValue(hKey, THEME_VALUE, static_cast<DWORD>(g_state.theme));
+        WriteDwordValue(hKey, PREMIUM_HEADER_ENABLED_VALUE, g_state.premiumHeaderEnabled ? 1 : 0);
         WriteDwordValue(hKey, WINDOW_OPACITY_VALUE, static_cast<DWORD>(g_state.windowOpacity));
         WriteDwordValue(hKey, BG_ENABLED_VALUE, g_state.background.enabled ? 1 : 0);
         WriteStringValue(hKey, BG_IMAGE_PATH_VALUE, g_state.background.imagePath);
@@ -331,4 +335,3 @@ void LoadOpenTabsSession(std::vector<std::wstring> &tabPaths, int &activeTabInde
 
     RegCloseKey(hKey);
 }
-

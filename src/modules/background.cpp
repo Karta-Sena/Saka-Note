@@ -12,6 +12,8 @@
 #include "resource.h"
 #include "settings.h"
 #include "lang/lang.h"
+#include "design_system.h"
+#include "tab_layout.h"
 #include <commdlg.h>
 #include <algorithm>
 
@@ -45,6 +47,40 @@ void ShutdownBackgroundGraphics()
         return;
     Gdiplus::GdiplusShutdown(g_gdiplusToken);
     g_gdiplusToken = 0;
+}
+
+Gdiplus::Image* LoadImageFromResource(HMODULE hMod, WORD resId, const wchar_t* resType)
+{
+    HRSRC hRes = FindResourceW(hMod, MAKEINTRESOURCEW(resId), resType);
+    if (!hRes) return nullptr;
+    DWORD resSize = SizeofResource(hMod, hRes);
+    HGLOBAL hResData = LoadResource(hMod, hRes);
+    if (!hResData) return nullptr;
+    void* pRes = LockResource(hResData);
+    if (!pRes) return nullptr;
+
+    HGLOBAL hBuffer = GlobalAlloc(GMEM_MOVEABLE, resSize);
+    if (!hBuffer) return nullptr;
+    void* pBuffer = GlobalLock(hBuffer);
+    if (!pBuffer) { GlobalFree(hBuffer); return nullptr; }
+    memcpy(pBuffer, pRes, resSize);
+    GlobalUnlock(hBuffer);
+
+    IStream* pStream = nullptr;
+    if (CreateStreamOnHGlobal(hBuffer, TRUE, &pStream) != S_OK)
+    {
+        GlobalFree(hBuffer);
+        return nullptr;
+    }
+
+    Gdiplus::Image* pImage = Gdiplus::Image::FromStream(pStream);
+    pStream->Release();
+    if (pImage && pImage->GetLastStatus() != Gdiplus::Ok)
+    {
+        delete pImage;
+        return nullptr;
+    }
+    return pImage;
 }
 
 void LoadBackgroundImage(const std::wstring &path)
@@ -204,7 +240,7 @@ void UpdateBackgroundBitmap(HWND hwnd)
         return;
     }
 
-    COLORREF bgColor = IsDarkMode() ? RGB(30, 30, 30) : GetSysColor(COLOR_WINDOW);
+    COLORREF bgColor = IsDarkMode() ? DesignSystem::Color::kDarkBg : GetSysColor(COLOR_WINDOW);
     HBRUSH hBrush = CreateSolidBrush(bgColor);
     if (!hBrush)
     {
@@ -379,7 +415,7 @@ static INT_PTR CALLBACK OpacityDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARA
         const int cancelX = rcClient.right - margin - buttonW;
         const int okX = cancelX - buttonGap - buttonW;
 
-        HFONT hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        HFONT hFont = TabGetRegularFont();
         CreateWindowExW(0, L"STATIC", lang.dialogBgOpacityLabel.c_str(), WS_CHILD | WS_VISIBLE, margin, labelY, labelW, labelH, hDlg, nullptr, nullptr, nullptr);
         hEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_RIGHT | ES_AUTOHSCROLL,
                                 inputX, rowY, inputW, inputH, hDlg, reinterpret_cast<HMENU>(1001), nullptr, nullptr);

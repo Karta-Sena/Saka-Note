@@ -23,6 +23,7 @@ void SetBackgroundPosition(BgPosition pos);
 void ViewSelectBackground();
 void ViewClearBackground();
 void ViewBackgroundOpacity();
+Gdiplus::Image* LoadImageFromResource(HMODULE hMod, WORD resId, const wchar_t* resType);
 
 // Starts GDI+ on demand for background rendering.
 bool EnsureBackgroundGraphicsReady();

@@ -15,6 +15,8 @@
 #include "editor.h"
 #include "resource.h"
 #include "settings.h"
+#include "design_system.h"
+#include "tab_layout.h"
 
 #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
 #define DWMWA_WINDOW_CORNER_PREFERENCE 33
@@ -40,6 +42,10 @@
 #define DWMWCP_ROUND 2
 #endif
 
+#ifndef DWMWCP_DONOTROUND
+#define DWMWCP_DONOTROUND 1
+#endif
+
 #ifndef DWMSBT_AUTO
 #define DWMSBT_AUTO 0
 #define DWMSBT_NONE 1
@@ -50,42 +56,54 @@
 
 COLORREF ThemeColorEditorBackground(bool dark)
 {
-    return dark ? RGB(28, 30, 34) : RGB(247, 247, 248);
+    return dark ? DesignSystem::Color::kDarkBg : DesignSystem::Color::kLightBg;
+}
+
+static COLORREF BlendThemeColor(COLORREF base, COLORREF overlay, int overlayPercent)
+{
+    overlayPercent = std::clamp(overlayPercent, 0, 100);
+    const int basePercent = 100 - overlayPercent;
+    const int r = (GetRValue(base) * basePercent + GetRValue(overlay) * overlayPercent) / 100;
+    const int g = (GetGValue(base) * basePercent + GetGValue(overlay) * overlayPercent) / 100;
+    const int b = (GetBValue(base) * basePercent + GetBValue(overlay) * overlayPercent) / 100;
+    return RGB(r, g, b);
 }
 
 COLORREF ThemeColorEditorText(bool dark)
 {
-    return dark ? RGB(232, 235, 239) : RGB(28, 30, 34);
+    return dark ? DesignSystem::Color::kDarkInk : DesignSystem::Color::kLightInk;
 }
 
 COLORREF ThemeColorStatusBackground(bool dark)
 {
-    return dark ? RGB(34, 37, 42) : RGB(242, 242, 244);
+    return dark ? DesignSystem::Color::kDarkBg : DesignSystem::Color::kLightBg;
 }
 
 COLORREF ThemeColorStatusText(bool dark)
 {
-    return dark ? RGB(214, 218, 225) : RGB(64, 69, 77);
+    return dark ? DesignSystem::Color::kDarkInk : DesignSystem::Color::kLightInk;
 }
 
 COLORREF ThemeColorMenuBackground(bool dark)
 {
-    return dark ? RGB(34, 37, 42) : RGB(242, 242, 244);
+    return dark ? DesignSystem::Color::kDarkBg : DesignSystem::Color::kLightBg;
 }
 
 COLORREF ThemeColorMenuHoverBackground(bool dark)
 {
-    return dark ? RGB(52, 56, 64) : RGB(229, 231, 236);
+    const COLORREF base = ThemeColorMenuBackground(dark);
+    return dark ? BlendThemeColor(base, RGB(255, 255, 255), 8)
+                : BlendThemeColor(base, RGB(0, 0, 0), 6);
 }
 
 COLORREF ThemeColorMenuText(bool dark)
 {
-    return dark ? RGB(233, 236, 242) : RGB(44, 47, 53);
+    return dark ? DesignSystem::Color::kDarkInk : DesignSystem::Color::kLightInk;
 }
 
 COLORREF ThemeColorChromeBorder(bool dark)
 {
-    return dark ? RGB(66, 71, 80) : RGB(212, 215, 222);
+    return dark ? DesignSystem::Color::kDarkEdge : DesignSystem::Color::kLightEdge;
 }
 
 bool SetTitleBarDark(HWND hwnd, BOOL dark)
@@ -117,14 +135,16 @@ bool SetTitleBarDark(HWND hwnd, BOOL dark)
                 applied = true;
         }
 
-        const DWORD cornerPref = DWMWCP_ROUND;
+        const DWORD cornerPref = DWMWCP_DONOTROUND;
         dwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPref, sizeof(cornerPref));
 
-        const DWORD backdropType = g_state.useTabs ? DWMSBT_TABBEDWINDOW : DWMSBT_MAINWINDOW;
+        DWORD backdropType = DWMSBT_TRANSIENTWINDOW;
+        if (hwnd == g_hwndMain)
+            backdropType = g_state.useTabs ? DWMSBT_TABBEDWINDOW : DWMSBT_MAINWINDOW;
         dwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
 
-        const COLORREF captionColor = dark ? RGB(32, 35, 40) : RGB(242, 242, 244);
-        const COLORREF titleTextColor = dark ? RGB(244, 246, 250) : RGB(35, 38, 43);
+        const COLORREF captionColor = ThemeColorMenuBackground(dark != FALSE);
+        const COLORREF titleTextColor = ThemeColorMenuText(dark != FALSE);
         const COLORREF borderColor = ThemeColorChromeBorder(dark != FALSE);
         dwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &captionColor, sizeof(captionColor));
         dwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &titleTextColor, sizeof(titleTextColor));
@@ -232,7 +252,7 @@ LRESULT CALLBACK StatusSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
             HFONT hFont = reinterpret_cast<HFONT>(SendMessageW(hwnd, WM_GETFONT, 0, 0));
             if (!hFont)
-                hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+                hFont = TabGetRegularFont();
             HFONT hOldFont = reinterpret_cast<HFONT>(SelectObject(hdc, hFont));
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, textColor);
@@ -323,7 +343,7 @@ void ApplyTheme()
     }
     ApplyThemeToWindowTree(g_hwndMain);
     if (g_hwndTabs)
-        SetWindowTheme(g_hwndTabs, dark ? L"" : L"Explorer", nullptr);
+        SetWindowTheme(g_hwndTabs, L"", nullptr);
     COLORREF bgColor = ThemeColorEditorBackground(dark != FALSE);
     COLORREF textColor = ThemeColorEditorText(dark != FALSE);
     SendMessageW(g_hwndEditor, EM_SETBKGNDCOLOR, 0, bgColor);
@@ -351,4 +371,44 @@ void ToggleDarkMode()
     g_state.theme = IsDarkMode() ? Theme::Light : Theme::Dark;
     ApplyTheme();
     SaveFontSettings();
+}
+
+TabPaintPalette GetTabPaintPalette(bool dark)
+{
+    if (dark)
+    {
+        const COLORREF activeBg = ThemeColorEditorBackground(true);
+        const COLORREF inactiveBg = BlendThemeColor(activeBg, RGB(0, 0, 0), 30);
+        const COLORREF hoverBg = BlendThemeColor(activeBg, RGB(255, 255, 255), 6);
+        return {
+            activeBg,                                         // stripBg
+            DesignSystem::Color::kDarkEdge,                   // stripBorder
+            activeBg,                                         // activeBg
+            inactiveBg,                                       // inactiveBg
+            hoverBg,                                          // hoverBg
+            DesignSystem::Color::kDarkEdge,                   // borderColor
+            BlendThemeColor(DesignSystem::Color::kDarkInk, activeBg, 34), // textColor
+            BlendThemeColor(DesignSystem::Color::kDarkInk, activeBg, 24), // activeTextColor
+            BlendThemeColor(DesignSystem::Color::kDarkInk, activeBg, 22), // closeColor
+            hoverBg,                                          // closeHoverBg
+            DesignSystem::Color::kDarkInk                     // closeHoverFg
+        };
+    }
+
+    const COLORREF activeBg = ThemeColorEditorBackground(false);
+    const COLORREF inactiveBg = BlendThemeColor(activeBg, RGB(0, 0, 0), 10);
+    const COLORREF hoverBg = BlendThemeColor(activeBg, RGB(0, 0, 0), 14);
+    return {
+        activeBg,                                           // stripBg
+        DesignSystem::Color::kLightEdge,                   // stripBorder
+        activeBg,                                           // activeBg
+        inactiveBg,                                         // inactiveBg
+        hoverBg,                                            // hoverBg
+        DesignSystem::Color::kLightEdge,                   // borderColor
+        BlendThemeColor(DesignSystem::Color::kLightInk, activeBg, 54), // textColor
+        BlendThemeColor(DesignSystem::Color::kLightInk, activeBg, 30), // activeTextColor
+        BlendThemeColor(DesignSystem::Color::kLightInk, activeBg, 54), // closeColor
+        hoverBg,                                            // closeHoverBg
+        DesignSystem::Color::kLightInk                     // closeHoverFg
+    };
 }

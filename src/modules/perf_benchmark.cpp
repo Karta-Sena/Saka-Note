@@ -11,6 +11,7 @@
 #include "file.h"
 #include "settings.h"
 #include "lang/lang.h"
+#include "tab_layout.h"
 
 #include <richedit.h>
 #include <array>
@@ -142,7 +143,10 @@ HWND CreateHiddenBenchmarkEditor()
 
     ConfigureEditorControl(hwnd);
     SendMessageW(hwnd, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(-1));
-    SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), FALSE);
+    HFONT hFont = g_state.hFont ? g_state.hFont : TabGetRegularFont();
+    if (!hFont)
+        hFont = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(hFont), FALSE);
     return hwnd;
 }
 
@@ -516,4 +520,3 @@ void HelpRunPerformanceBenchmark()
 {
     RunPerformanceBenchmark(true);
 }
-
