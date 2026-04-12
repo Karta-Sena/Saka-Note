@@ -3,9 +3,6 @@
 <p align="left">
   <img src="src/logo_wordmark.png" alt="Technical Standard Note wordmark" width="420">
 </p>
-<p align="left">
-  <img src="assets/branding/technical-standard-note-icon.png" alt="Technical Standard Note icon" width="96">
-</p>
 
 Technical Standard Note is a lightweight Win32 text editor focused on speed, stability, and clarity.
 
