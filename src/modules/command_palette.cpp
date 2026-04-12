@@ -316,9 +316,9 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
         // ALWAYS USE LOGICAL DIMENSIONS inside D2D, do NOT use GetClientRect bounds 
         // to prevent UI layout double-scaling bug on High-DPI monitors.
         float w = (float)kPaletteWidth;
-        int count = std::min((int)s->results.size(), kMaxVisible);
-        if (count == 0) count = 1;
-        float h = kQueryAreaH + kBorderW + count * kItemH + 16.0f;
+        int visibleCount = std::min((int)s->results.size(), kMaxVisible);
+        if (visibleCount == 0) visibleCount = 1;
+        float h = kQueryAreaH + kBorderW + visibleCount * kItemH + 16.0f;
 
         ctx->Clear(bgColor);
 
@@ -374,9 +374,9 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
 
             // ── Results list ────────────────────────────────────
             float yBase = kQueryAreaH + 4.0f;
-            int count = std::min((int)s->results.size(), kMaxVisible);
+            int resultCount = std::min((int)s->results.size(), kMaxVisible);
 
-            if (count == 0 && !s->query.empty()) {
+            if (resultCount == 0 && !s->query.empty()) {
                 D2D1_RECT_F noRes = D2D1::RectF(kPadH, yBase, w - kPadH, yBase + kItemH);
                 if (fmtLabel) fmtLabel->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 const auto &lang = GetLangStrings();
@@ -384,7 +384,7 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
                     static_cast<UINT32>(lang.paletteNoResults.length()), fmtLabel, noRes, brMuted);
             }
 
-            for (int i = 0; i < count; ++i) {
+            for (int i = 0; i < resultCount; ++i) {
                 auto& cmd = s->results[i];
                 bool sel  = (i == s->selectedIndex);
                 float top = yBase + i * kItemH;

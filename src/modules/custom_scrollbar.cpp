@@ -44,10 +44,10 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
 
     switch (msg) {
     case WM_CREATE: {
-        State* state = new State();
-        state->hwndTarget = reinterpret_cast<HWND>(reinterpret_cast<CREATESTRUCT*>(lParam)->lpCreateParams);
-        state->engine.Initialize(hwnd);
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+        State* createdState = new State();
+        createdState->hwndTarget = reinterpret_cast<HWND>(reinterpret_cast<CREATESTRUCT*>(lParam)->lpCreateParams);
+        createdState->engine.Initialize(hwnd);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createdState));
         return 0;
     }
     case WM_SIZE: {
