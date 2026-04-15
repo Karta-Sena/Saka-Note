@@ -61,4 +61,21 @@ Kita belajar bahwa ikon aplikasi bukan hanya satu file gambar.
 
 ### 💎 Praktik Terbaik Baru
 - **Spring Over Linear**: Selalu gunakan pegas untuk elemen yang bergerak mengikuti interaksi user (seperti tab atau border gap). Ini membuat aplikasi terasa "hidup".
-- **Surgical Rollback**: Jangan ragu untuk menarik kembali fitur eksperimental yang merusak stabilitas. Stabilitas adalah fitur nomor satu.
+
+---
+
+## Log Pembaruan: 15 April 2026, 23:10 (The Blueprint Transition)
+
+Malam ini kita bergeser dari kehangatan Amber ke kedinginan presisi **Blueprint Blue (#001ae2)**. Ini bukan sekadar perubahan warna, tapi pergeseran tone produk.
+
+### 🏙️ Arsitektur: Identitas "Technical Ink"
+Warna aksen baru ini memberikan nuansa cetak biru teknis. Kita menggunakan format BGR `0xE21A00` untuk memastikan konsistensi pada level rendering Win32.
+
+### 🦉 Kebijaksanaan: Lexicon Branding Insights
+Kita mengeksplorasi teknik penamaan brand premium:
+- **Phonetic Simplicity**: Nama harus mudah diucapkan tapi memiliki "vibrasi" yang kuat (seperti pola "S" dan "L" pada Solum atau konsonan tajam pada calon nama baru).
+- **Polarization**: Sebuah brand premium tidak harus disukai semua orang, tapi harus terasa "benar" bagi target penggunanya (insinyur, penulis teknis).
+
+### 💎 Praktik Terbaik Baru
+- **Surgical Code Implementation**: Selalu gunakan prinsip Karpathy—ubah sesedikit mungkin baris kode (orthogonality) untuk mencapai dampak maksimal.
+- **Continuous Validation**: Setiap perubahan konstanta visual diikuti dengan siklus `Build -> Run` untuk memastikan tidak ada efek samping pada pipeline rendering GDI+.
