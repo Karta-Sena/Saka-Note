@@ -1288,6 +1288,11 @@ static void UpdateRuntimeMenuStates()
     EnableMenuItem(hMenu, IDM_FORMAT_BOLD, MF_BYCOMMAND | (g_state.largeFileMode ? MF_GRAYED : MF_ENABLED));
     EnableMenuItem(hMenu, IDM_FORMAT_ITALIC, MF_BYCOMMAND | (g_state.largeFileMode ? MF_GRAYED : MF_ENABLED));
     EnableMenuItem(hMenu, IDM_FORMAT_STRIKETHROUGH, MF_BYCOMMAND | (g_state.largeFileMode ? MF_GRAYED : MF_ENABLED));
+    DWORD selStart = 0;
+    DWORD selEnd = 0;
+    if (g_hwndEditor)
+        SendMessageW(g_hwndEditor, EM_GETSEL, reinterpret_cast<WPARAM>(&selStart), reinterpret_cast<LPARAM>(&selEnd));
+
 
     const bool tabModeActive = g_state.useTabs;
     const bool hasMultipleTabs = g_documents.size() > 1;
@@ -2212,6 +2217,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         UI::CommandPalette::AddCommand(L"Editor: Zoom In", L"Increase font size", IDM_VIEW_ZOOMIN);
         UI::CommandPalette::AddCommand(L"Editor: Zoom Out", L"Decrease font size", IDM_VIEW_ZOOMOUT);
 
+
         ConfigureEditorControl(g_hwndEditor);
         if (kEnableCommandBar)
         {
@@ -2260,14 +2266,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             SetWindowLongW(g_hwndMain, GWL_EXSTYLE, GetWindowLongW(g_hwndMain, GWL_EXSTYLE) | WS_EX_LAYERED);
             SetLayeredWindowAttributes(g_hwndMain, 0, g_state.windowOpacity, LWA_ALPHA);
-        }
-        if (!g_state.customIconPath.empty())
-        {
-            if (!ApplyCustomIcon(g_state.customIconPath, g_state.customIconIndex, false))
-            {
-                g_state.customIconPath.clear();
-                g_state.customIconIndex = 0;
-            }
         }
         if (g_state.background.enabled && !g_state.background.imagePath.empty())
         {
@@ -2542,6 +2540,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         AppendMenuW(hPopup, MF_STRING, IDM_EDIT_DELETE, MenuLabelForContext(lang.menuDelete).c_str());
         AppendMenuW(hPopup, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(hPopup, MF_STRING, IDM_EDIT_SELECTALL, MenuLabelForContext(lang.menuSelectAll).c_str());
+        AppendMenuW(hPopup, MF_SEPARATOR, 0, nullptr);
+
 
         DWORD selStart = 0, selEnd = 0;
         SendMessageW(g_hwndEditor, EM_GETSEL, reinterpret_cast<WPARAM>(&selStart), reinterpret_cast<LPARAM>(&selEnd));
@@ -2556,6 +2556,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         EnableMenuItem(hPopup, IDM_EDIT_COPY, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(hPopup, IDM_EDIT_PASTE, MF_BYCOMMAND | (canPaste ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(hPopup, IDM_EDIT_DELETE, MF_BYCOMMAND | (hasSelection ? MF_ENABLED : MF_GRAYED));
+
 
         const UINT cmd = TrackPopupMenuLightweight(hPopup, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, hwnd);
         DestroyMenu(hPopup);
@@ -2857,11 +2858,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             DeleteObject(g_bgBitmap);
             g_bgBitmap = nullptr;
-        }
-        if (g_hCustomIcon)
-        {
-            DestroyIcon(g_hCustomIcon);
-            g_hCustomIcon = nullptr;
         }
         if (g_hbrStatusDark)
         {

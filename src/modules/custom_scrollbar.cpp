@@ -4,9 +4,22 @@
 #include "theme.h"
 #include <commctrl.h>
 #include <richedit.h>
+#include <windowsx.h>
 #include <algorithm>
+#include <cmath>
 
 namespace UI {
+
+namespace
+{
+constexpr UINT_PTR kScrollbarAnimationTimerId = 0x5A11;
+constexpr float kThumbWidthIdle = 4.0f;
+constexpr float kThumbWidthHover = 6.0f;
+constexpr float kThumbWidthDrag = 8.0f;
+constexpr float kThumbOpacityIdle = 0.28f;
+constexpr float kThumbOpacityHover = 0.74f;
+constexpr float kThumbOpacityDrag = 0.92f;
+}
 
 bool CustomScrollbar::RegisterClass(HINSTANCE hInstance)
 {
@@ -42,11 +55,35 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
 {
     State* state = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
 
+    auto animateVisualState = [&](bool immediate)
+    {
+        if (!state)
+            return;
+
+        const float targetOpacity = state->isDragging ? kThumbOpacityDrag : (state->isHovered ? kThumbOpacityHover : kThumbOpacityIdle);
+        const float targetWidth = state->isDragging ? kThumbWidthDrag : (state->isHovered ? kThumbWidthHover : kThumbWidthIdle);
+
+        if (immediate)
+        {
+            state->opacitySpring.Reset(targetOpacity);
+            state->widthSpring.Reset(targetWidth);
+            KillTimer(hwnd, kScrollbarAnimationTimerId);
+            return;
+        }
+
+        state->opacitySpring.target = targetOpacity;
+        state->widthSpring.target = targetWidth;
+
+        state->lastUpdate = GetTickCount64();
+        SetTimer(hwnd, kScrollbarAnimationTimerId, 16, nullptr);
+    };
+
     switch (msg) {
     case WM_CREATE: {
         State* createdState = new State();
         createdState->hwndTarget = reinterpret_cast<HWND>(reinterpret_cast<CREATESTRUCT*>(lParam)->lpCreateParams);
         createdState->engine.Initialize(hwnd);
+        createdState->lastUpdate = GetTickCount64();
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(createdState));
         return 0;
     }
@@ -60,55 +97,37 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             state->isHovered = true;
             TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd, 0 };
             TrackMouseEvent(&tme);
+            animateVisualState(false);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         
         if (state->isDragging && state->hwndTarget) {
             RECT rc;
             GetClientRect(hwnd, &rc);
-            POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
-            
-            SCROLLINFO si{};
-            si.cbSize = sizeof(si);
-            si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-            if (!GetScrollInfo(state->hwndTarget, SB_VERT, &si))
-                return 0;
-            int trackHeight = rc.bottom - rc.top;
-            float thumbSize = si.nMax > si.nMin ? (float)(trackHeight * si.nPage) / (si.nMax - si.nMin + 1) : 20.0f;
-            thumbSize = std::max(thumbSize, 20.0f);
+            POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
 
-            const int usableTrackHeight = std::max(1, trackHeight - static_cast<int>(thumbSize));
-            float scrollRatio = static_cast<float>(pt.y - static_cast<int>(thumbSize) / 2) / static_cast<float>(usableTrackHeight);
+            const int trackHeight = rc.bottom - rc.top;
+            const float thumbH = std::max(20.0f, state->thumbHeight);
+            const int usableTrack = std::max(1, trackHeight - static_cast<int>(thumbH));
+
+            // Anchor drag to where within the thumb the user originally clicked.
+            // This prevents the thumb from jumping to center-under-cursor.
+            const int anchoredY = pt.y - state->dragThumbOffset;
+            float scrollRatio = static_cast<float>(anchoredY) / static_cast<float>(usableTrack);
             scrollRatio = std::clamp(scrollRatio, 0.0f, 1.0f);
 
-            const int maxPos = std::max(si.nMin, si.nMax - static_cast<int>(si.nPage) + 1);
-            int newPos = si.nMin + static_cast<int>(scrollRatio * (maxPos - si.nMin));
-            newPos = std::clamp(newPos, si.nMin, maxPos);
-            int lineDelta = newPos - si.nPos;
-            lineDelta = std::clamp(lineDelta, -256, 256);
+            // Use EM_GETFIRSTVISIBLELINE as the ground truth — avoids relying on
+            // GetScrollInfo which can return stale data when the native scrollbar is hidden.
+            const int totalLines = std::max(1, (int)SendMessageW(state->hwndTarget, EM_GETLINECOUNT, 0, 0));
+            const int maxFirstLine = std::max(0, totalLines - 1);
+            const int targetLine = static_cast<int>(scrollRatio * maxFirstLine + 0.5f);
+            const int firstVisible = (int)SendMessageW(state->hwndTarget, EM_GETFIRSTVISIBLELINE, 0, 0);
+            const int lineDelta = std::clamp(targetLine - firstVisible, -4096, 4096);
+
             if (lineDelta != 0)
             {
-                const int pageStep = std::max(1, static_cast<int>(si.nPage) - 1);
-                while (lineDelta >= pageStep)
-                {
-                    SendMessageW(state->hwndTarget, WM_VSCROLL, SB_PAGEDOWN, 0);
-                    lineDelta -= pageStep;
-                }
-                while (lineDelta <= -pageStep)
-                {
-                    SendMessageW(state->hwndTarget, WM_VSCROLL, SB_PAGEUP, 0);
-                    lineDelta += pageStep;
-                }
-                while (lineDelta > 0)
-                {
-                    SendMessageW(state->hwndTarget, WM_VSCROLL, SB_LINEDOWN, 0);
-                    --lineDelta;
-                }
-                while (lineDelta < 0)
-                {
-                    SendMessageW(state->hwndTarget, WM_VSCROLL, SB_LINEUP, 0);
-                    ++lineDelta;
-                }
+                SendMessageW(state->hwndTarget, EM_LINESCROLL, 0, static_cast<LPARAM>(lineDelta));
+                RedrawWindow(state->hwndTarget, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE);
             }
             InvalidateRect(hwnd, nullptr, FALSE);
         }
@@ -117,13 +136,21 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
     case WM_MOUSELEAVE:
         if (state) {
             state->isHovered = false;
+            animateVisualState(false);
             if (!state->isDragging) InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
     case WM_LBUTTONDOWN:
-        if (state) {
+        if (state && state->hwndTarget) {
+            POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             state->isDragging = true;
+            state->dragStartY = pt.y;
+            state->dragStartFirstLine = (int)SendMessageW(state->hwndTarget, EM_GETFIRSTVISIBLELINE, 0, 0);
+            state->dragTotalLines = std::max(1, (int)SendMessageW(state->hwndTarget, EM_GETLINECOUNT, 0, 0));
+            // Capture where within the thumb the user clicked (avoid jump)
+            state->dragThumbOffset = pt.y - (int)state->thumbPos;
             SetCapture(hwnd);
+            animateVisualState(false);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
@@ -133,9 +160,32 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             ReleaseCapture();
             if (state->hwndTarget)
                 SetFocus(state->hwndTarget);
+            animateVisualState(false);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
+    case WM_TIMER:
+        if (wParam == kScrollbarAnimationTimerId && state)
+        {
+            ULONGLONG now = GetTickCount64();
+            float dt = static_cast<float>(now - state->lastUpdate) / 1000.0f;
+            state->lastUpdate = now;
+
+            // Cap dt to avoid explosion on massive lag
+            dt = std::min(dt, 0.1f);
+
+            state->opacitySpring.Update(dt);
+            state->widthSpring.Update(dt);
+
+            InvalidateRect(hwnd, nullptr, FALSE);
+
+            if (state->opacitySpring.IsSettled() && state->widthSpring.IsSettled())
+            {
+                KillTimer(hwnd, kScrollbarAnimationTimerId);
+            }
+            return 0;
+        }
+        break;
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL:
         if (state && state->hwndTarget) {
@@ -169,6 +219,8 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             
             float scrollRange = (float)(si.nMax - si.nMin - (int)si.nPage + 1);
             float thumbY = scrollRange > 0 ? (si.nPos * (trackHeight - thumbHeight)) / scrollRange : 0;
+            state->thumbPos = thumbY;
+            state->thumbHeight = thumbHeight;
 
             context->BeginDraw();
             
@@ -176,7 +228,7 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             D2D1_COLOR_F bgColor = Graphics::Engine::ColorToD2D(dark ? DesignSystem::Color::kDarkBg : DesignSystem::Color::kLightBg, 1.0f);
             context->Clear(bgColor);
             
-            float opacity = (state->isHovered || state->isDragging) ? 0.8f : 0.3f;
+            const float opacity = std::clamp(state->opacitySpring.x, 0.0f, 1.0f);
             D2D1_COLOR_F color = Graphics::Engine::ColorToD2D(DesignSystem::Color::kAccent, opacity);
             
             ID2D1SolidColorBrush* brush = nullptr;
@@ -184,11 +236,26 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             
             if (brush) {
                 float width = (float)(rc.right - rc.left);
-                float barWidth = (state->isHovered || state->isDragging) ? width - 2.0f : 4.0f;
+                float barWidth = std::clamp(state->widthSpring.x, 3.0f, std::max(3.0f, width - 1.0f));
                 float xOffset = (width - barWidth) / 2.0f;
                 
                 D2D1_RECT_F rect = D2D1::RectF(xOffset, thumbY, xOffset + barWidth, thumbY + thumbHeight);
-                context->FillRectangle(rect, brush);
+                D2D1_ROUNDED_RECT rounded = D2D1::RoundedRect(rect, barWidth * 0.5f, barWidth * 0.5f);
+                context->FillRoundedRectangle(rounded, brush);
+
+                if (state->isDragging)
+                {
+                    ID2D1SolidColorBrush* glowBrush = nullptr;
+                    D2D1_COLOR_F glowColor = Graphics::Engine::ColorToD2D(DesignSystem::Color::kAccent, opacity * 0.24f);
+                    context->CreateSolidColorBrush(glowColor, &glowBrush);
+                    if (glowBrush)
+                    {
+                        D2D1_RECT_F glowRect = D2D1::RectF(rect.left - 1.0f, rect.top - 1.0f, rect.right + 1.0f, rect.bottom + 1.0f);
+                        D2D1_ROUNDED_RECT glowRounded = D2D1::RoundedRect(glowRect, (barWidth + 2.0f) * 0.5f, (barWidth + 2.0f) * 0.5f);
+                        context->FillRoundedRectangle(glowRounded, glowBrush);
+                        glowBrush->Release();
+                    }
+                }
                 brush->Release();
             }
             
@@ -199,6 +266,7 @@ LRESULT CALLBACK CustomScrollbar::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
         return 0;
     }
     case WM_DESTROY:
+        KillTimer(hwnd, kScrollbarAnimationTimerId);
         delete state;
         return 0;
     }

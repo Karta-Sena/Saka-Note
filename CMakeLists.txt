@@ -44,7 +44,6 @@ add_executable(Otso WIN32
     src/modules/command_routing.cpp
     src/modules/dialog.cpp
     src/modules/commands.cpp
-    src/modules/icon_actions.cpp
     src/modules/perf_benchmark.cpp
     src/modules/tab_layout.cpp
     src/modules/tab_model_ops.cpp
@@ -200,7 +199,7 @@ endif()
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_NSIS_DISPLAY_NAME "Otso")
 set(CPACK_NSIS_PACKAGE_NAME "Otso")
-set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/wisesakarta/solum")
+set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/wisesakarta/otso")
 set(CPACK_NSIS_MODIFY_PATH ON)
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/src/icon.ico")

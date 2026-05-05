@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include "graphics_engine.h"
+#include "animation_controller.h"
 
 namespace UI {
 
@@ -37,6 +38,9 @@ private:
         std::vector<CommandAction> results;
         int selectedIndex = 0;
         float animationProgress = 0.0f; // For reveal animation
+        float selectionVisualTop = 0.0f;
+        Animation::Transition revealTransition;
+        Animation::Transition selectionTransition;
         bool isClosing = false;
     };
     

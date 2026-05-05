@@ -33,6 +33,5 @@ HBRUSH g_hbrDialogDark = nullptr;
 HBRUSH g_hbrDialogEditDark = nullptr;
 PAGESETUPDLGW g_pageSetup = {};
 std::wstring g_statusTexts[4];
-HICON g_hCustomIcon = nullptr;
 std::wstring g_editorClassName;
 HMODULE g_hRichEditModule = nullptr;

@@ -72,6 +72,60 @@ int RunListContinuationTests()
         ok = ExpectEq(L"No-spacing number continuation normalizes spacing", plan.continuationPrefix, L"2. ") && ok;
     }
 
+    {
+        const std::wstring pasted = L"3. c\r\n3. d\r\n3. e";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"2. b");
+        ok = ExpectEq(L"Paste duplicate numbering corrected with context continuation", normalized, L"3. c\r\n4. d\r\n5. e") && ok;
+    }
+
+    {
+        const std::wstring pasted = L"7. x\n7. y";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"plain text");
+        ok = ExpectEq(L"Paste duplicate numbering corrected without context", normalized, L"7. x\n8. y") && ok;
+    }
+
+    {
+        const std::wstring pasted = L"3. c\r\n   details about c\r\n3. d";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"2. b");
+        ok = ExpectEq(L"Paste keeps numbering sequence across wrapped list item lines", normalized, L"3. c\r\n   details about c\r\n4. d") && ok;
+    }
+
+    {
+        const std::wstring pasted = L"3. c\r\n\r\n3. d";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"2. b");
+        ok = ExpectEq(L"Paste keeps numbering sequence across blank separator lines", normalized, L"3. c\r\n\r\n4. d") && ok;
+    }
+
+    {
+        const std::wstring pasted = L"3. c\r\nRepro details line\r\n3. d";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"2. b");
+        ok = ExpectEq(L"Paste keeps numbering sequence across non-list explanatory lines when source marker repeats", normalized, L"3. c\r\nRepro details line\r\n4. d") && ok;
+    }
+
+    {
+        const std::wstring pasted = L"3. c\r\nSection break\r\n1. fresh list";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"2. b");
+        ok = ExpectEq(L"Paste starts a new sequence after explanatory line when next source marker changes", normalized, L"3. c\r\nSection break\r\n1. fresh list") && ok;
+    }
+
+    {
+        const std::wstring pasted = L"009) alpha\r\n009) beta";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"008) root");
+        ok = ExpectEq(L"Paste keeps padded numbering with ')' delimiter", normalized, L"009) alpha\r\n010) beta") && ok;
+    }
+
+    {
+        const std::wstring pasted = L"1) alpha\r\n1) beta\r\n1. gamma\r\n1. delta";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"0) root");
+        ok = ExpectEq(L"Paste renumbers each number-symbol sequence independently", normalized, L"1) alpha\r\n2) beta\r\n1. gamma\r\n2. delta") && ok;
+    }
+
+    {
+        const std::wstring pasted = L"- alpha\r\n- beta";
+        const std::wstring normalized = NormalizeOrderedListForPaste(pasted, L"2. root");
+        ok = ExpectEq(L"Paste leaves bullet list unchanged", normalized, pasted) && ok;
+    }
+
     if (!ok)
         return 1;
     std::wcout << L"[PASS] list continuation tests\n";

@@ -55,20 +55,38 @@ inline int ScalePx(int logicalPx, HWND hwnd = nullptr)
     return static_cast<int>(logicalPx * GetDpiScale(hwnd) + 0.5f);
 }
 
-// Color Tokens (Mobile Parity)
+// ── Color Tokens ────────────────────────────────────────────────────
+//
+// All values are Windows COLORREF (0x00BBGGRR — little-endian RGB).
+// To convert a standard #RRGGBB hex to COLORREF: reverse the byte pairs.
+//   Example: #001AE2  →  COLORREF 0xE21A00
+//
+// !! REBRANDING NOTE !!
+// Only kAccent needs to change for a full rebrand.
+// Formula: kAccent = 0x<BB><GG><RR>  where BB/GG/RR are bytes of your #RRGGBB.
+//
 namespace Color
 {
-inline constexpr unsigned long kBlack = 0x000000;        // #000000
-inline constexpr unsigned long kDarkBg = 0x121212;       // #121212 (Slate Deep)
-inline constexpr unsigned long kDarkInk = 0xD6D6D6;      // #D6D6D6 (Soft Silver)
-inline constexpr unsigned long kDarkEdge = 0x8B8B8B;     // #D6D6D6 @ 0.65
-inline constexpr unsigned long kDarkMuted = 0xABABAB;    // #D6D6D6 @ 0.80
+// ── Dark mode ──────────────────────────────────────────────────────
+inline constexpr unsigned long kDarkBg      = 0x121212; // #121212  background
+inline constexpr unsigned long kDarkInk     = 0xD6D6D6; // #D6D6D6  primary text
+inline constexpr unsigned long kDarkMuted   = 0xABABAB; // #ABABAB  secondary text (inactive tabs)
+inline constexpr unsigned long kDarkSubtle  = 0x8A8A8A; // #8A8A8A  tertiary text (descriptions)
+inline constexpr unsigned long kDarkFaint   = 0x484848; // #484848  quaternary text (footer labels)
+inline constexpr unsigned long kDarkEdge    = 0x8B8B8B; // #8B8B8B  borders / separators
+inline constexpr unsigned long kDarkSurface = 0x242424; // #242424  elevated surface (cards, containers)
 
-inline constexpr unsigned long kLightBg = 0xFBFDFD;      // #FDFDFB (Studio Bone)
-inline constexpr unsigned long kLightInk = 0x1A1A1A;     // #1A1A1A (Ink Dark)
-inline constexpr unsigned long kLightEdge = 0x8F8F8F;     // #1A1A1A @ 0.62
-inline constexpr unsigned long kLightMuted = 0x4D4D4D;   // #1A1A1A @ 0.76
+// ── Light mode ─────────────────────────────────────────────────────
+inline constexpr unsigned long kLightBg      = 0xFBFDFD; // #FDFDFB  background (Studio Bone)
+inline constexpr unsigned long kLightInk     = 0x1A1A1A; // #1A1A1A  primary text
+inline constexpr unsigned long kLightMuted   = 0x4D4D4D; // #4D4D4D  secondary text (inactive tabs)
+inline constexpr unsigned long kLightSubtle  = 0x5C5C5C; // #5C5C5C  tertiary text (descriptions)
+inline constexpr unsigned long kLightFaint   = 0xA0A0A0; // #A0A0A0  quaternary text (footer labels)
+inline constexpr unsigned long kLightEdge    = 0x8F8F8F; // #8F8F8F  borders / separators
+inline constexpr unsigned long kLightSurface = 0xE6E8E8; // #E8E8E6  elevated surface (cards, containers)
 
-inline constexpr unsigned long kAccent = 0xE21A00;       // #001AE2 (Blueprint Blue - BGR Format)
+// ── Accent — change this to rebrand ────────────────────────────────
+// Current brand: Blueprint Blue #001AE2  →  COLORREF 0xE21A00
+inline constexpr unsigned long kAccent = 0xE21A00; // #001AE2  Blueprint Blue
 }
 }

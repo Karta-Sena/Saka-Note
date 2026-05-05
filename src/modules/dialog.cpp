@@ -153,84 +153,128 @@ INT_PTR HandleAboutPaint(HWND hWnd)
     GetClientRect(hWnd, &rcClient);
 
     const bool dark = IsDarkMode();
-    const TabPaintPalette palette = GetTabPaintPalette(dark);
-    
-    FillSolidRectDc(hdc, rcClient, palette.stripBg);
 
-    if (true)
+    // Background — matches editor background for seamless feel
+    const COLORREF bgColor = dark ? DesignSystem::Color::kDarkBg : DesignSystem::Color::kLightBg;
+    FillSolidRectDc(hdc, rcClient, bgColor);
+
+    // ---------- Logo container (squircle-style rounded rect) ----------
+    const int iconSize   = ScaleDialogPx(96);
+    const int containerSize = ScaleDialogPx(120);
+    const int containerX = (rcClient.right - containerSize) / 2;
+    const int containerY = ScaleDialogPx(40);
+
+    // Container fill: slightly elevated surface
+    const COLORREF containerColor = dark ? DesignSystem::Color::kDarkSurface : DesignSystem::Color::kLightSurface;
+    HBRUSH hContainerBrush = CreateSolidBrush(containerColor);
+    RECT rcContainer = { containerX, containerY,
+                         containerX + containerSize, containerY + containerSize };
+    // Rounded rect to approximate squircle feel
+    HPEN hNullPen = (HPEN)GetStockObject(NULL_PEN);
+    HPEN hOldPen = (HPEN)SelectObject(hdc, hNullPen);
+    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hContainerBrush);
+    const int radius = ScaleDialogPx(22);
+    RoundRect(hdc, rcContainer.left, rcContainer.top,
+                   rcContainer.right, rcContainer.bottom, radius, radius);
+    SelectObject(hdc, hOldBrush);
+    SelectObject(hdc, hOldPen);
+    DeleteObject(hContainerBrush);
+
+    // Icon centered inside container
+    const int iconId = dark ? IDI_IN_APP_ICON_DARK : IDI_IN_APP_ICON_LIGHT;
+    HICON hIcon = (HICON)LoadImageW(GetModuleHandleW(nullptr),
+                                    MAKEINTRESOURCEW(iconId),
+                                    IMAGE_ICON, iconSize, iconSize, LR_DEFAULTCOLOR);
+    if (!hIcon)
+        hIcon = (HICON)LoadImageW(GetModuleHandleW(nullptr),
+                                  MAKEINTRESOURCEW(IDI_IN_APP_ICON),
+                                  IMAGE_ICON, iconSize, iconSize, LR_DEFAULTCOLOR);
+    if (hIcon)
     {
-        // Draw the Floating In-App Icon (Transparent Monogram)
-        // Select icon based on current theme for better visibility
-        int iconId = IDI_IN_APP_ICON; // Default
-        if (dark) {
-            iconId = IDI_IN_APP_ICON_DARK;
-        } else {
-            iconId = IDI_IN_APP_ICON_LIGHT;
-        }
-
-        HICON hIcon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(iconId), IMAGE_ICON, ScaleDialogPx(112), ScaleDialogPx(112), LR_DEFAULTCOLOR);
-        
-        // Fallback to generic in-app icon if themed versions are not available
-        if (!hIcon) {
-            hIcon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_IN_APP_ICON), IMAGE_ICON, ScaleDialogPx(112), ScaleDialogPx(112), LR_DEFAULTCOLOR);
-        }
-
-        if (hIcon)
-        {
-            int iconSize = ScaleDialogPx(112);
-            int x = (rcClient.right - iconSize) / 2;
-            int y = ScaleDialogPx(25);
-            DrawIconEx(hdc, x, y, hIcon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
-            DestroyIcon(hIcon);
-        }
+        int iconX = containerX + (containerSize - iconSize) / 2;
+        int iconY = containerY + (containerSize - iconSize) / 2;
+        DrawIconEx(hdc, iconX, iconY, hIcon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
+        DestroyIcon(hIcon);
     }
 
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, palette.textColor);
-
+    // ---------- Typography ----------
     const HFONT hFontReg = DialogUiFont();
 
-    LOGFONTW mediumLf{};
-    if (hFontReg)
+    auto MakeFont = [&](const wchar_t* face, int weight, int extraPtDelta) -> HFONT {
+        LOGFONTW lf{};
+        if (hFontReg) GetObjectW(hFontReg, sizeof(lf), &lf);
+        wcscpy_s(lf.lfFaceName, face);
+        lf.lfWeight = weight;
+        if (extraPtDelta != 0)
+        {
+            HDC hdcRef = GetDC(hWnd);
+            const int dpiY = hdcRef ? GetDeviceCaps(hdcRef, LOGPIXELSY) : 96;
+            if (hdcRef) ReleaseDC(hWnd, hdcRef);
+            lf.lfHeight = -MulDiv(DesignSystem::kChromeFontPointSize + extraPtDelta,
+                                  dpiY, 72);
+        }
+        HFONT f = CreateFontIndirectW(&lf);
+        return f ? f : hFontReg;
+    };
+
+    HFONT hFontMedium   = MakeFont(DesignSystem::kUiFontPrimaryMedium,   FW_MEDIUM,   0);
+    HFONT hFontSemibold = MakeFont(DesignSystem::kUiFontPrimarySemibold, FW_SEMIBOLD, 1);
+    HFONT hFontSmall    = MakeFont(DesignSystem::kUiFontPrimary,         FW_NORMAL,  -1);
+
+    SetBkMode(hdc, TRANSPARENT);
+
+    // Version — semibold, primary ink
     {
-        GetObjectW(hFontReg, sizeof(mediumLf), &mediumLf);
-        wcscpy_s(mediumLf.lfFaceName, DesignSystem::kUiFontPrimaryMedium);
-        mediumLf.lfWeight = FW_MEDIUM;
+        const COLORREF inkColor = dark ? DesignSystem::Color::kDarkInk : DesignSystem::Color::kLightInk;
+        SetTextColor(hdc, inkColor);
+        HGDIOBJ old = SelectObject(hdc, hFontSemibold);
+        std::wstring verText = L"Otso  v" + std::wstring(APP_VERSION);
+        const int verY = containerY + containerSize + ScaleDialogPx(20);
+        RECT rcVer = { ScaleDialogPx(24), verY,
+                       rcClient.right - ScaleDialogPx(24), verY + ScaleDialogPx(22) };
+        DrawTextW(hdc, verText.c_str(), -1, &rcVer, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(hdc, old);
     }
-    HFONT hFontMedium = CreateFontIndirectW(&mediumLf);
-    if (!hFontMedium) hFontMedium = hFontReg;
 
-    LOGFONTW semiboldLf{};
-    if (hFontReg)
+    // Manifesto — medium weight, 60% opacity equivalent (muted color)
     {
-        GetObjectW(hFontReg, sizeof(semiboldLf), &semiboldLf);
-        wcscpy_s(semiboldLf.lfFaceName, DesignSystem::kUiFontPrimarySemibold);
-        semiboldLf.lfWeight = FW_SEMIBOLD;
+        const COLORREF mutedColor = dark ? DesignSystem::Color::kDarkSubtle : DesignSystem::Color::kLightSubtle;
+        SetTextColor(hdc, mutedColor);
+        HGDIOBJ old = SelectObject(hdc, hFontMedium);
+        const wchar_t* manifesto =
+            L"Otso Note is a product of the Otso Department, a division of "
+            L"Technical Standard. Driven by the mission to achieve “The "
+            L"Renaissance of Software” and uphold the culture of “Tools "
+            L"for Tough,” we focus on creating high-fidelity instruments for "
+            L"power users who care about the craft of digital writing.";
+        const int textTop = containerY + containerSize + ScaleDialogPx(50);
+        RECT rcManifesto = { ScaleDialogPx(32), textTop,
+                             rcClient.right - ScaleDialogPx(32),
+                             rcClient.bottom - ScaleDialogPx(48) };
+        DrawTextW(hdc, manifesto, -1, &rcManifesto,
+                  DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
+        SelectObject(hdc, old);
     }
-    HFONT hFontSemibold = CreateFontIndirectW(&semiboldLf);
-    if (!hFontSemibold) hFontSemibold = hFontReg;
 
-    HGDIOBJ oldFont = SelectObject(hdc, hFontSemibold);
-    std::wstring verText = L"v" + std::wstring(APP_VERSION);
-    RECT rcVer = { 0, ScaleDialogPx(150), rcClient.right, ScaleDialogPx(175) };
-    DrawTextW(hdc, verText.c_str(), -1, &rcVer, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
+    // Footer — very muted, small
+    {
+        const COLORREF footerColor = dark ? DesignSystem::Color::kDarkFaint : DesignSystem::Color::kLightFaint;
+        SetTextColor(hdc, footerColor);
+        HGDIOBJ old = SelectObject(hdc, hFontSmall);
+        const wchar_t* footer = L"Technical Standard";
+        RECT rcFooter = { 0, rcClient.bottom - ScaleDialogPx(32),
+                          rcClient.right, rcClient.bottom - ScaleDialogPx(12) };
+        DrawTextW(hdc, footer, -1, &rcFooter,
+                  DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        SelectObject(hdc, old);
+    }
 
-    SelectObject(hdc, hFontMedium);
-    std::wstring copyText = L"Crafted with discipline by wisesakarta (Technical Standard)";
-    RECT rcCopy = { 0, ScaleDialogPx(180), rcClient.right, ScaleDialogPx(205) };
-    DrawTextW(hdc, copyText.c_str(), -1, &rcCopy, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
-
-    std::wstring subText = L"Clarity. Function. Detail.";
-    RECT rcSub = { 0, ScaleDialogPx(200), rcClient.right, ScaleDialogPx(225) };
-    DrawTextW(hdc, subText.c_str(), -1, &rcSub, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
-
-    SelectObject(hdc, oldFont);
-    if (hFontMedium && hFontMedium != hFontReg) DeleteObject(hFontMedium);
+    if (hFontMedium   && hFontMedium   != hFontReg) DeleteObject(hFontMedium);
     if (hFontSemibold && hFontSemibold != hFontReg) DeleteObject(hFontSemibold);
+    if (hFontSmall    && hFontSmall    != hFontReg) DeleteObject(hFontSmall);
 
     EndPaint(hWnd, &ps);
     return 0;
-
 }
 
 LRESULT CALLBACK AboutWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -757,8 +801,8 @@ void HelpAbout()
         clsRegistered = true;
     }
 
-    int winW = ScaleDialogPx(420);
-    int winH = ScaleDialogPx(260);
+    int winW = ScaleDialogPx(400);
+    int winH = ScaleDialogPx(420);
 
     RECT rcMain;
     GetWindowRect(g_hwndMain, &rcMain);
