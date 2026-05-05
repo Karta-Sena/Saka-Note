@@ -19,6 +19,7 @@
 #include "../core/globals.h"
 #include "../lang/lang.h"
 #include <algorithm>
+#include <cmath>
 #include <commctrl.h>
 
 namespace UI {
@@ -30,6 +31,14 @@ static constexpr float kItemH          = 46.0f;
 static constexpr float kPadH           = 20.0f;
 static constexpr float kBorderW        = 1.0f;
 static constexpr int   kMaxVisible     = 8;
+static constexpr UINT_PTR kAnimationTimerId = 0x5A21;
+static constexpr float kRevealDurationMs = 160.0f;
+static constexpr float kSelectionSlideDurationMs = 140.0f;
+
+static float ResultTopForIndex(int index)
+{
+    return kQueryAreaH + 4.0f + static_cast<float>(std::max(index, 0)) * kItemH;
+}
 
 std::vector<CommandAction> CommandPalette::s_commands;
 
@@ -70,6 +79,10 @@ HWND CommandPalette::Create(HWND hwndParent)
         s->hwndParent = hwndParent;
         s->engine.Initialize(hwnd);
         s->results = s_commands;
+        s->animationProgress = 1.0f;
+        s->selectionVisualTop = ResultTopForIndex(0);
+        s->revealTransition.endValue = 1.0f;
+        s->selectionTransition.endValue = s->selectionVisualTop;
         
         s->hwndEdit = CreateWindowExW(
             0, L"EDIT", L"",
@@ -94,6 +107,11 @@ void CommandPalette::Show(HWND hwnd)
     s->results        = s_commands;
     s->selectedIndex  = 0;
     s->isClosing      = false;
+    s->selectionVisualTop = ResultTopForIndex(0);
+    s->selectionTransition.active = false;
+    s->selectionTransition.endValue = s->selectionVisualTop;
+    s->revealTransition.Start(0.0f, 1.0f, kRevealDurationMs);
+    s->animationProgress = 0.0f;
 
     int visibleItems = std::min((int)s->results.size(), kMaxVisible);
     if (visibleItems == 0) visibleItems = 1;
@@ -135,12 +153,14 @@ void CommandPalette::Show(HWND hwnd)
     SetWindowPos(hwnd, HWND_TOPMOST, x, y, scaledW, scaledH, SWP_SHOWWINDOW);
     SetForegroundWindow(hwnd);
     SetFocus(s->hwndEdit);
+    SetTimer(hwnd, kAnimationTimerId, 16, nullptr);
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 void CommandPalette::Hide(HWND hwnd)
 {
     State* s = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    KillTimer(hwnd, kAnimationTimerId);
     ShowWindow(hwnd, SW_HIDE);
     if (s && s->hwndParent) {
         SetForegroundWindow(s->hwndParent);
@@ -188,6 +208,9 @@ void CommandPalette::PerformFuzzySearch(HWND hwnd, const std::wstring& query)
             [](const CommandAction& a, const CommandAction& b) { return a.score > b.score; });
     }
     s->selectedIndex = 0;
+    s->selectionVisualTop = ResultTopForIndex(0);
+    s->selectionTransition.active = false;
+    s->selectionTransition.endValue = s->selectionVisualTop;
 
     // Resize to fit
     int visibleItems = std::min((int)s->results.size(), kMaxVisible);
@@ -207,6 +230,27 @@ void CommandPalette::PerformFuzzySearch(HWND hwnd, const std::wstring& query)
 LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     State* s = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    auto animateSelectionToIndex = [&](int index)
+    {
+        if (!s)
+            return;
+
+        const float targetTop = ResultTopForIndex(index);
+        const float currentTop = s->selectionTransition.active ? s->selectionTransition.GetCurrentValue() : s->selectionVisualTop;
+        s->selectionVisualTop = currentTop;
+
+        if (std::fabs(targetTop - currentTop) > 0.005f)
+        {
+            s->selectionTransition.Start(currentTop, targetTop, kSelectionSlideDurationMs);
+            SetTimer(hwnd, kAnimationTimerId, 16, nullptr);
+        }
+        else
+        {
+            s->selectionVisualTop = targetTop;
+            s->selectionTransition.active = false;
+            s->selectionTransition.endValue = targetTop;
+        }
+    };
 
     switch (msg) {
 
@@ -257,6 +301,37 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
         }
         return 0;
 
+    case WM_TIMER:
+        if (!s || wParam != kAnimationTimerId)
+            break;
+        {
+            bool animating = false;
+            if (s->revealTransition.active)
+            {
+                s->animationProgress = s->revealTransition.GetCurrentValue();
+                animating = animating || s->revealTransition.active;
+            }
+            else
+            {
+                s->animationProgress = s->revealTransition.endValue;
+            }
+
+            if (s->selectionTransition.active)
+            {
+                s->selectionVisualTop = s->selectionTransition.GetCurrentValue();
+                animating = animating || s->selectionTransition.active;
+            }
+            else
+            {
+                s->selectionVisualTop = s->selectionTransition.endValue;
+            }
+
+            InvalidateRect(hwnd, nullptr, FALSE);
+            if (!animating)
+                KillTimer(hwnd, kAnimationTimerId);
+        }
+        return 0;
+
     case WM_KEYDOWN:
         if (!s) break;
         switch (wParam) {
@@ -275,6 +350,7 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
                 s->selectedIndex = (s->selectedIndex > 0)
                     ? s->selectedIndex - 1
                     : (int)s->results.size() - 1;
+                animateSelectionToIndex(s->selectedIndex);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -282,6 +358,7 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
             if (!s->results.empty()) {
                 s->selectedIndex = (s->selectedIndex < (int)s->results.size() - 1)
                     ? s->selectedIndex + 1 : 0;
+                animateSelectionToIndex(s->selectedIndex);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -308,10 +385,12 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
         const D2D1_COLOR_F mutedColor = Graphics::Engine::ColorToD2D(dark ? DesignSystem::Color::kDarkMuted : DesignSystem::Color::kLightMuted);
         const D2D1_COLOR_F edgeColor  = Graphics::Engine::ColorToD2D(dark ? DesignSystem::Color::kDarkEdge : DesignSystem::Color::kLightEdge, 0.5f);
 
-        // Selected-row background: subtle Emil-style contrast
+        const float revealProgress = std::clamp(s->animationProgress, 0.0f, 1.0f);
+
+        // Selected-row background: subtle Emil-style contrast, animated on open.
         const D2D1_COLOR_F selBg = dark
-            ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.08f)
-            : D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.04f);
+            ? D2D1::ColorF(1.0f, 1.0f, 1.0f, (0.08f * revealProgress))
+            : D2D1::ColorF(0.0f, 0.0f, 0.0f, (0.04f * revealProgress));
 
         // ALWAYS USE LOGICAL DIMENSIONS inside D2D, do NOT use GetClientRect bounds 
         // to prevent UI layout double-scaling bug on High-DPI monitors.
@@ -384,16 +463,19 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
                     static_cast<UINT32>(lang.paletteNoResults.length()), fmtLabel, noRes, brMuted);
             }
 
+            if (resultCount > 0 && brSelBg)
+            {
+                const float minTop = yBase;
+                const float maxTop = yBase + (resultCount - 1) * kItemH;
+                const float animatedTop = std::clamp(s->selectionVisualTop, minTop, maxTop);
+                D2D1_RECT_F selRect = D2D1::RectF(8.0f, animatedTop, w - 8.0f, animatedTop + kItemH);
+                D2D1_ROUNDED_RECT roundedSel = D2D1::RoundedRect(selRect, 8.0f, 8.0f);
+                ctx->FillRoundedRectangle(roundedSel, brSelBg);
+            }
+
             for (int i = 0; i < resultCount; ++i) {
                 auto& cmd = s->results[i];
-                bool sel  = (i == s->selectedIndex);
                 float top = yBase + i * kItemH;
-
-                if (sel) {
-                    // Subtle background (Emil style)
-                    D2D1_RECT_F selRect = D2D1::RectF(8.0f, top, w - 8.0f, top + kItemH); // Slightly inset
-                    ctx->FillRectangle(selRect, brSelBg);
-                }
 
                 // Command label
                 D2D1_RECT_F labelRect = D2D1::RectF(kPadH, top + 6, w - kPadH, top + 24);
@@ -428,6 +510,7 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
 
     case WM_DESTROY:
         if (s) {
+            KillTimer(hwnd, kAnimationTimerId);
             if (s->hFontEdit) DeleteObject(s->hFontEdit);
             if (s->hbrEdit) DeleteObject(s->hbrEdit);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);

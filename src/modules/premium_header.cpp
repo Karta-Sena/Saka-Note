@@ -53,6 +53,7 @@ namespace Premium
         if (m_isInitialized)
         {
             m_revealSpring.Update(dt);
+            m_scaleSpring.Update(dt);
         }
     }
 
@@ -60,6 +61,10 @@ namespace Premium
     {
         m_revealSpring.Reset(0.0f);
         m_revealSpring.target = 1.0f;
+        
+        m_scaleSpring.Reset(0.92f);
+        m_scaleSpring.target = 1.0f;
+        m_scaleSpring.stiffness = 180.0f; // Slightly softer pop
     }
 
     void Header::Render(const RECT& rect)
@@ -70,6 +75,7 @@ namespace Premium
         if (!pRT) return;
 
         float alpha = m_revealSpring.x;
+        float scale = m_scaleSpring.x;
         
         D2D1_RECT_F layoutRect = D2D1::RectF(
             static_cast<float>(rect.left),
@@ -77,6 +83,17 @@ namespace Premium
             static_cast<float>(rect.right),
             static_cast<float>(rect.bottom)
         );
+
+        // Apply organic pop scale transform centered on the header
+        D2D1::Matrix3x2F originalTransform;
+        pRT->GetTransform(&originalTransform);
+        
+        D2D1_POINT_2F center = D2D1::Point2F(
+            (layoutRect.left + layoutRect.right) * 0.5f,
+            (layoutRect.top + layoutRect.bottom) * 0.5f
+        );
+        
+        pRT->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale, center) * originalTransform);
 
         if (m_pTextBrush) {
             bool dark = IsDarkMode();
@@ -86,10 +103,22 @@ namespace Premium
                 GetGValue(cText) / 255.0f,
                 GetBValue(cText) / 255.0f
             ));
-            m_pTextBrush->SetOpacity(alpha);
+
             const auto &lang = GetLangStrings();
             const std::wstring &wordmark = lang.appNameWordmark.empty() ? lang.appName : lang.appNameWordmark;
+
+            // Render optical rim highlight for depth (subtle offset)
+            m_pTextBrush->SetOpacity(alpha * 0.15f);
+            D2D1_RECT_F rimRect = layoutRect;
+            rimRect.top += 0.5f;
+            rimRect.bottom += 0.5f;
+            pRT->DrawTextW(wordmark.c_str(), static_cast<UINT32>(wordmark.length()), m_pTextFormat, rimRect, m_pTextBrush);
+
+            // Primary logo text
+            m_pTextBrush->SetOpacity(alpha);
             pRT->DrawTextW(wordmark.c_str(), static_cast<UINT32>(wordmark.length()), m_pTextFormat, layoutRect, m_pTextBrush);
         }
+
+        pRT->SetTransform(originalTransform);
     }
 }

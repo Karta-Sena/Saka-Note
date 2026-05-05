@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <d2d1_1.h>
 #include "graphics_engine.h"
+#include "../core/spring_solver.h"
 
 namespace UI {
 
@@ -21,7 +22,14 @@ private:
         bool isDragging = false;
         float thumbPos = 0.0f;
         float thumbHeight = 0.0f;
-        float opacity = 0.0f; // For auto-hide animation
+        Core::Spring opacitySpring{0.28f};
+        Core::Spring widthSpring{4.0f};
+        ULONGLONG lastUpdate = 0;
+        // Drag anchor: captured at WM_LBUTTONDOWN to avoid thumb jump
+        int dragStartY = 0;
+        int dragStartFirstLine = 0;
+        int dragTotalLines = 1;
+        int dragThumbOffset = 0; // Y offset within thumb where user clicked
     };
 };
 

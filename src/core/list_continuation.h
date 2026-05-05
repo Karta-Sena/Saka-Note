@@ -11,3 +11,4 @@ struct ListContinuationPlan
 };
 
 ListContinuationPlan BuildListContinuationPlan(const std::wstring &lineText, size_t caretOffsetInLine);
+std::wstring NormalizeOrderedListForPaste(const std::wstring &pastedText, const std::wstring &contextLineText);

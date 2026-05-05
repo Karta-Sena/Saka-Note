@@ -196,6 +196,21 @@ namespace
 bool g_suppressNextReturnChar = false;
 int g_verticalWheelDeltaRemainder = 0;
 
+void RequestEditorVisualRefresh(HWND hwnd, bool immediate, bool eraseBackground)
+{
+    if (!hwnd)
+        return;
+
+    UINT redrawFlags = RDW_INVALIDATE;
+    redrawFlags |= eraseBackground ? RDW_ERASE : RDW_NOERASE;
+    if (immediate)
+        redrawFlags |= RDW_UPDATENOW;
+    RedrawWindow(hwnd, nullptr, nullptr, redrawFlags);
+
+    if (g_hwndSelectionAura)
+        InvalidateRect(g_hwndSelectionAura, nullptr, FALSE);
+}
+
 struct ListContinuation
 {
     bool enabled = false;
@@ -204,6 +219,58 @@ struct ListContinuation
     LONG lineEnd = 0;
     std::wstring continuationPrefix;
 };
+
+std::wstring ReadEditorLineTextByIndex(HWND hwnd, LONG lineIndex)
+{
+    if (lineIndex < 0)
+        return {};
+
+    const LONG lineStart = static_cast<LONG>(SendMessageW(hwnd, EM_LINEINDEX, static_cast<WPARAM>(lineIndex), 0));
+    if (lineStart < 0)
+        return {};
+
+    const LONG lineLength = static_cast<LONG>(SendMessageW(hwnd, EM_LINELENGTH, static_cast<WPARAM>(lineStart), 0));
+    if (lineLength < 0)
+        return {};
+
+    std::wstring lineText(static_cast<size_t>(lineLength) + 1, L'\0');
+    if (lineLength > 0)
+    {
+        TEXTRANGEW textRange{};
+        textRange.chrg.cpMin = lineStart;
+        textRange.chrg.cpMax = lineStart + lineLength;
+        textRange.lpstrText = lineText.data();
+        SendMessageW(hwnd, EM_GETTEXTRANGE, 0, reinterpret_cast<LPARAM>(&textRange));
+    }
+    lineText.resize(static_cast<size_t>(lineLength));
+    return lineText;
+}
+
+bool ReadClipboardUnicodeText(HWND owner, std::wstring &outText)
+{
+    outText.clear();
+    if (!OpenClipboard(owner))
+        return false;
+
+    HANDLE clipboardData = GetClipboardData(CF_UNICODETEXT);
+    if (!clipboardData)
+    {
+        CloseClipboard();
+        return false;
+    }
+
+    const wchar_t *clipboardText = static_cast<const wchar_t *>(GlobalLock(clipboardData));
+    if (!clipboardText)
+    {
+        CloseClipboard();
+        return false;
+    }
+
+    outText = clipboardText;
+    GlobalUnlock(clipboardData);
+    CloseClipboard();
+    return true;
+}
 
 bool BuildListContinuationForEnter(HWND hwnd, ListContinuation &continuation)
 {
@@ -248,6 +315,36 @@ bool BuildListContinuationForEnter(HWND hwnd, ListContinuation &continuation)
     continuation.enabled = true;
     continuation.exitListMode = plan.exitListMode;
     continuation.continuationPrefix = plan.continuationPrefix;
+    return true;
+}
+
+bool HandleOrderedListPaste(HWND hwnd)
+{
+    std::wstring clipboardText;
+    if (!ReadClipboardUnicodeText(hwnd, clipboardText) || clipboardText.empty())
+        return false;
+
+    DWORD selStart = 0;
+    SendMessageW(hwnd, EM_GETSEL, reinterpret_cast<WPARAM>(&selStart), 0);
+
+    const LONG lineIndex = static_cast<LONG>(SendMessageW(hwnd, EM_EXLINEFROMCHAR, 0, static_cast<LPARAM>(selStart)));
+    if (lineIndex < 0)
+        return false;
+
+    LONG contextLineIndex = lineIndex;
+    const LONG lineStart = static_cast<LONG>(SendMessageW(hwnd, EM_LINEINDEX, static_cast<WPARAM>(lineIndex), 0));
+    if (lineStart >= 0 && selStart == static_cast<DWORD>(lineStart) && lineIndex > 0)
+        contextLineIndex = lineIndex - 1;
+
+    const std::wstring contextLineText = ReadEditorLineTextByIndex(hwnd, contextLineIndex);
+    const std::wstring normalizedText = NormalizeOrderedListForPaste(clipboardText, contextLineText);
+    if (normalizedText == clipboardText)
+        return false;
+
+    SendMessageW(hwnd, EM_BEGINUNDOACTION, 0, 0);
+    SendMessageW(hwnd, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(normalizedText.c_str()));
+    SendMessageW(hwnd, EM_ENDUNDOACTION, 0, 0);
+    RequestEditorVisualRefresh(hwnd, true, true);
     return true;
 }
 
@@ -448,10 +545,10 @@ void ApplyEditorViewportPadding()
     if (rc.right <= rc.left || rc.bottom <= rc.top)
         return;
 
-    int padLeft = ScaleEditorPx(8);
-    int padRight = ScaleEditorPx(8);
-    int padTop = ScaleEditorPx(12);
-    int padBottom = ScaleEditorPx(6);
+    int padLeft = ScaleEditorPx(16);
+    int padRight = ScaleEditorPx(16);
+    int padTop = ScaleEditorPx(20);
+    int padBottom = ScaleEditorPx(12);
 
     if ((rc.right - rc.left) <= (padLeft + padRight + 4))
     {
@@ -577,6 +674,7 @@ bool ScrollEditorFromMouseWheel(HWND hwndEditor, WPARAM wParam)
     if (scrollLines == static_cast<UINT>(WHEEL_PAGESCROLL))
     {
         SendMessageW(hwndEditor, WM_VSCROLL, (delta > 0) ? SB_PAGEUP : SB_PAGEDOWN, 0);
+        RequestEditorVisualRefresh(hwndEditor, false, false);
         return true;
     }
 
@@ -588,6 +686,7 @@ bool ScrollEditorFromMouseWheel(HWND hwndEditor, WPARAM wParam)
         int lineDelta = -static_cast<int>(scrollLines) * wheelSteps;
         lineDelta = std::clamp(lineDelta, -120, 120);
         SendMessageW(hwndEditor, EM_LINESCROLL, 0, lineDelta);
+        RequestEditorVisualRefresh(hwndEditor, false, false);
     }
     return true;
 }
@@ -632,10 +731,36 @@ void DeleteWordBackward()
         return;
     std::wstring text = GetEditorText();
     size_t pos = start;
-    while (pos > 0 && iswspace(text[pos - 1]))
+
+    // Skip horizontal whitespace only (preserve newline boundary)
+    while (pos > 0 && (text[pos - 1] == L' ' || text[pos - 1] == L'\t'))
         --pos;
-    while (pos > 0 && !iswspace(text[pos - 1]))
+
+    if (pos == 0)
+    {
+        SendMessageW(g_hwndEditor, EM_SETSEL, 0, start);
+        SendMessageW(g_hwndEditor, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L""));
+        return;
+    }
+
+    const wchar_t prev = text[pos - 1];
+    if (prev == L'\n' || prev == L'\r')
+    {
+        // Delete just the line break
         --pos;
+    }
+    else if (iswalpha(prev) || iswdigit(prev))
+    {
+        // Delete the contiguous word (alphanumeric run)
+        while (pos > 0 && (iswalpha(text[pos - 1]) || iswdigit(text[pos - 1])))
+            --pos;
+    }
+    else
+    {
+        // Delete a single punctuation / symbol character
+        --pos;
+    }
+
     SendMessageW(g_hwndEditor, EM_SETSEL, pos, start);
     SendMessageW(g_hwndEditor, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L""));
 }
@@ -650,12 +775,36 @@ void DeleteWordForward()
         return;
     }
     std::wstring text = GetEditorText();
-    size_t len = text.size();
+    const size_t len = text.size();
     size_t pos = start;
-    while (pos < len && !iswspace(text[pos]))
+
+    if (pos >= len)
+        return;
+
+    const wchar_t cur = text[pos];
+    if (cur == L'\n' || cur == L'\r')
+    {
         ++pos;
-    while (pos < len && iswspace(text[pos]))
+    }
+    else if (iswalpha(cur) || iswdigit(cur))
+    {
+        while (pos < len && (iswalpha(text[pos]) || iswdigit(text[pos])))
+            ++pos;
+        // Also consume trailing horizontal whitespace
+        while (pos < len && (text[pos] == L' ' || text[pos] == L'\t'))
+            ++pos;
+    }
+    else if (cur == L' ' || cur == L'\t')
+    {
+        while (pos < len && (text[pos] == L' ' || text[pos] == L'\t'))
+            ++pos;
+    }
+    else
+    {
+        // Single punctuation / symbol
         ++pos;
+    }
+
     SendMessageW(g_hwndEditor, EM_SETSEL, start, pos);
     SendMessageW(g_hwndEditor, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L""));
 }
@@ -704,6 +853,10 @@ LRESULT CALLBACK EditorSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     case WM_VSCROLL:
         if (g_hwndScrollbar) InvalidateRect(g_hwndScrollbar, nullptr, FALSE);
         if (g_hwndSelectionAura) InvalidateRect(g_hwndSelectionAura, nullptr, FALSE);
+        break;
+    case WM_PASTE:
+        if (HandleOrderedListPaste(hwnd))
+            return 0;
         break;
     case WM_CHAR:
     {

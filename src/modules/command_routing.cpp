@@ -164,16 +164,6 @@ bool RouteStandardCommand(HWND hwnd, WORD cmd)
         SetBackgroundPosition(BgPosition::Fill);
         return true;
 
-    case IDM_VIEW_ICON_CHANGE:
-        ViewChangeIcon();
-        return true;
-    case IDM_VIEW_ICON_SYSTEM:
-        ViewChooseSystemIcon();
-        return true;
-    case IDM_VIEW_ICON_RESET:
-        ViewResetIcon();
-        return true;
-
     case IDM_HELP_CHECKUPDATES:
         HelpCheckUpdates();
         return true;

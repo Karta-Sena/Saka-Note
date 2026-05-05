@@ -26,6 +26,7 @@ namespace Premium
     private:
         Graphics::Engine* m_pEngine = nullptr;
         Core::Spring m_revealSpring;
+        Core::Spring m_scaleSpring{0.92f};
         ID2D1SolidColorBrush* m_pAccentBrush = nullptr;
         ID2D1SolidColorBrush* m_pTextBrush = nullptr;
         IDWriteTextFormat* m_pTextFormat = nullptr;

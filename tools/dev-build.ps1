@@ -135,9 +135,9 @@ function Get-BuiltExePath {
     )
 
     if ($Candidate.MultiConfig) {
-        return Join-Path $BuildPath "$ConfigName/technical-standard-note.exe"
+        return Join-Path $BuildPath "$ConfigName/Otso.exe"
     }
-    return Join-Path $BuildPath "technical-standard-note.exe"
+    return Join-Path $BuildPath "Otso.exe"
 }
 
 if (-not (Test-ToolAvailable "cmake")) {

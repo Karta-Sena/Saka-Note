@@ -400,7 +400,7 @@ TabPaintPalette GetTabPaintPalette(bool dark)
     
     if (dark)
     {
-        const COLORREF inactiveBg = BlendThemeColor(activeBg, DesignSystem::Color::kBlack, 20);
+        const COLORREF inactiveBg = BlendThemeColor(activeBg, 0x000000, 20);
         const COLORREF hoverBg = BlendThemeColor(activeBg, accent, 8); // Orange tint for hover
         return {
             activeBg,                                         // stripBg
@@ -417,7 +417,7 @@ TabPaintPalette GetTabPaintPalette(bool dark)
         };
     }
 
-    const COLORREF inactiveBg = BlendThemeColor(activeBg, DesignSystem::Color::kBlack, 6);
+    const COLORREF inactiveBg = BlendThemeColor(activeBg, 0x000000, 6);
     const COLORREF hoverBg = BlendThemeColor(activeBg, accent, 12); // Orange tint for hover
     return {
         activeBg,                                           // stripBg

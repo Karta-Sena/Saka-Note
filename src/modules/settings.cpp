@@ -30,6 +30,7 @@
 #define BG_IMAGE_PATH_VALUE L"BgImagePath"
 #define BG_POSITION_VALUE L"BgPosition"
 #define BG_OPACITY_VALUE L"BgOpacity"
+// Legacy values kept only for cleanup now that custom icon selection is removed.
 #define CUSTOM_ICON_PATH_VALUE L"CustomIconPath"
 #define CUSTOM_ICON_INDEX_VALUE L"CustomIconIndex"
 #define RECENT_FILES_VALUE L"RecentFiles"
@@ -215,14 +216,6 @@ void LoadFontSettings()
         if (ReadDwordValue(hKey, BG_OPACITY_VALUE, dwordValue))
             g_state.background.opacity = static_cast<BYTE>(std::clamp(static_cast<int>(dwordValue), 0, 255));
 
-        if (ReadStringValue(hKey, CUSTOM_ICON_PATH_VALUE, strValue))
-            g_state.customIconPath = strValue;
-        int customIconIndexValue = 0;
-        if (ReadIntValue(hKey, CUSTOM_ICON_INDEX_VALUE, customIconIndexValue))
-            g_state.customIconIndex = customIconIndexValue;
-        else
-            g_state.customIconIndex = 0;
-
         int intValue = 0;
         const bool hasX = ReadIntValue(hKey, WINDOW_X_VALUE, intValue);
         if (hasX)
@@ -253,8 +246,6 @@ void LoadFontSettings()
 
         if (g_state.background.imagePath.empty())
             g_state.background.enabled = false;
-        if (g_state.customIconPath.empty())
-            g_state.customIconIndex = 0;
 
         RegCloseKey(hKey);
     }
@@ -281,8 +272,8 @@ void SaveFontSettings()
         WriteStringValue(hKey, BG_IMAGE_PATH_VALUE, g_state.background.imagePath);
         WriteDwordValue(hKey, BG_POSITION_VALUE, static_cast<DWORD>(g_state.background.position));
         WriteDwordValue(hKey, BG_OPACITY_VALUE, static_cast<DWORD>(g_state.background.opacity));
-        WriteStringValue(hKey, CUSTOM_ICON_PATH_VALUE, g_state.customIconPath);
-        WriteIntValue(hKey, CUSTOM_ICON_INDEX_VALUE, g_state.customIconIndex);
+        RegDeleteValueW(hKey, CUSTOM_ICON_PATH_VALUE);
+        RegDeleteValueW(hKey, CUSTOM_ICON_INDEX_VALUE);
         WriteDwordValue(hKey, SETTINGS_SCHEMA_VERSION_VALUE, SETTINGS_SCHEMA_VERSION);
         WriteIntValue(hKey, WINDOW_X_VALUE, g_state.windowX);
         WriteIntValue(hKey, WINDOW_Y_VALUE, g_state.windowY);

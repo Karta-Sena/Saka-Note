@@ -16,7 +16,7 @@
 #define APP_VERSION L"1.1.0"
 #define APP_GITHUB_OWNER L"wisesakarta"
 #define APP_GITHUB_REPO L"Otso"
-#define APP_REPOSITORY_URL L"https://github.com/wisesakarta/solum"
+#define APP_REPOSITORY_URL L"https://github.com/wisesakarta/otso"
 #define ZOOM_MIN 25
 #define ZOOM_MAX 500
 #define ZOOM_DEFAULT 100
@@ -134,8 +134,6 @@ struct AppState
     HFONT hFont = nullptr;
     std::deque<std::wstring> recentFiles;
     BackgroundSettings background;
-    std::wstring customIconPath;
-    int customIconIndex = 0;
     bool useTabs = true;
     StartupBehavior startupBehavior = StartupBehavior::ResumeAll;
     bool largeFileMode = false;
