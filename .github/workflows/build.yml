@@ -15,15 +15,15 @@ jobs:
   build:
     runs-on: windows-latest
     strategy:
+      fail-fast: false
       matrix:
-        # Win32 release disabled temporarily due recurring Defender false-positive reports.
         arch: [x64, ARM64]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install NSIS
-        run: choco install nsis -y
+        run: choco install nsis -y --version 3.10
 
       - name: Configure CMake
         run: cmake -B build-${{ matrix.arch }} -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=Release
@@ -73,7 +73,7 @@ jobs:
           }
 
       - name: Package (NSIS)
-        run: cpack --config build-${{ matrix.arch }}/CPackConfig.cmake -C Release
+        run: cpack --config build-${{ matrix.arch }}/CPackConfig.cmake -C Release --verbose
 
       - name: Collect Setup Installer
         shell: pwsh
