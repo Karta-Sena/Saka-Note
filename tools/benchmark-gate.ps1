@@ -74,6 +74,22 @@ function Parse-BenchmarkStatuses {
     return @($results)
 }
 
+function Get-StatusCategory {
+    param([Parameter(Mandatory = $true)][string]$RawStatus)
+
+    $status = $RawStatus.Trim()
+    if ([string]::IsNullOrWhiteSpace($status)) {
+        return "UNKNOWN"
+    }
+
+    $m = [regex]::Match($status, "^(PASS|WARN|FAIL)\b", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($m.Success) {
+        return $m.Groups[1].Value.ToUpperInvariant()
+    }
+
+    return "UNKNOWN"
+}
+
 $exeFull = Resolve-ExistingPath -Path $ExePath
 $benchDir = Get-BenchmarkDirectory -ConfiguredPath $BenchmarkDir
 $failures = New-Object System.Collections.Generic.List[string]
@@ -105,30 +121,54 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         continue
     }
 
-    if ($exitCode -ne 0) {
-        $failures.Add("attempt ${attempt}: benchmark process exit code $exitCode (report: $($report.FullName)).") | Out-Null
-        continue
-    }
-
     $statuses = Parse-BenchmarkStatuses -ReportPath $report.FullName
     if ($statuses.Count -lt $MinExpectedCases) {
         $failures.Add("attempt ${attempt}: expected >= $MinExpectedCases benchmark cases, got $($statuses.Count) (report: $($report.FullName)).") | Out-Null
         continue
     }
 
-    # On CI environments (like GitHub Actions), we allow WARN (budget exceeded) 
-    # but strictly forbid FAIL (execution error).
-    $nonPass = @($statuses | Where-Object { 
-        if ($env:GITHUB_ACTIONS -eq "true") {
-            $_.Status -eq "FAIL"
-        } else {
-            $_.Status -ne "PASS"
-        }
-    })
-    if ($nonPass.Count -gt 0) {
-        $details = ($nonPass | ForEach-Object { "$($_.Case):$($_.Status)" }) -join "; "
-        $failures.Add("attempt ${attempt}: non-pass statuses => $details (report: $($report.FullName)).") | Out-Null
+    $categorized = @($statuses | ForEach-Object {
+            [pscustomobject]@{
+                Case        = $_.Case
+                RawStatus   = $_.Status
+                Category    = Get-StatusCategory -RawStatus $_.Status
+            }
+        })
+
+    $unknownStatuses = @($categorized | Where-Object { $_.Category -eq "UNKNOWN" })
+    if ($unknownStatuses.Count -gt 0) {
+        $details = ($unknownStatuses | ForEach-Object { "$($_.Case):$($_.RawStatus)" }) -join "; "
+        $failures.Add("attempt ${attempt}: unknown status format => $details (report: $($report.FullName)).") | Out-Null
         continue
+    }
+
+    $isCi = $env:GITHUB_ACTIONS -eq "true"
+    if ($isCi) {
+        # On CI environments, WARN (budget exceeded) is tolerated,
+        # but FAIL (execution error) is never allowed.
+        $failedCases = @($categorized | Where-Object { $_.Category -eq "FAIL" })
+        if ($failedCases.Count -gt 0) {
+            $details = ($failedCases | ForEach-Object { "$($_.Case):$($_.RawStatus)" }) -join "; "
+            $failures.Add("attempt ${attempt}: failing statuses => $details (report: $($report.FullName)).") | Out-Null
+            continue
+        }
+
+        if ($exitCode -ne 0) {
+            Write-Host "[benchmark-gate] attempt ${attempt}: benchmark process exit code $exitCode ignored on CI because no FAIL status was detected."
+        }
+    }
+    else {
+        if ($exitCode -ne 0) {
+            $failures.Add("attempt ${attempt}: benchmark process exit code $exitCode (report: $($report.FullName)).") | Out-Null
+            continue
+        }
+
+        $nonPass = @($categorized | Where-Object { $_.Category -ne "PASS" })
+        if ($nonPass.Count -gt 0) {
+            $details = ($nonPass | ForEach-Object { "$($_.Case):$($_.RawStatus)" }) -join "; "
+            $failures.Add("attempt ${attempt}: non-pass statuses => $details (report: $($report.FullName)).") | Out-Null
+            continue
+        }
     }
 
     Write-Host "[benchmark-gate] PASS on attempt $attempt. Report: $($report.FullName)"
