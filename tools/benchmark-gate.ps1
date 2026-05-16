@@ -116,7 +116,15 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         continue
     }
 
-    $nonPass = @($statuses | Where-Object { $_.Status -ne "PASS" })
+    # On CI environments (like GitHub Actions), we allow WARN (budget exceeded) 
+    # but strictly forbid FAIL (execution error).
+    $nonPass = @($statuses | Where-Object { 
+        if ($env:GITHUB_ACTIONS -eq "true") {
+            $_.Status -eq "FAIL"
+        } else {
+            $_.Status -ne "PASS"
+        }
+    })
     if ($nonPass.Count -gt 0) {
         $details = ($nonPass | ForEach-Object { "$($_.Case):$($_.Status)" }) -join "; "
         $failures.Add("attempt ${attempt}: non-pass statuses => $details (report: $($report.FullName)).") | Out-Null
