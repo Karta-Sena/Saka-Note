@@ -71,7 +71,7 @@ function Parse-BenchmarkStatuses {
         }
     }
 
-    return @($results)
+    return $results.ToArray()
 }
 
 function Get-StatusCategory {
@@ -105,9 +105,15 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     Write-Host "[benchmark-gate] Attempt $attempt/$MaxAttempts running --benchmark-ci ..."
 
     $exitCode = 0
-    & $exeFull --benchmark-ci
-    if (Test-Path Variable:\LASTEXITCODE) {
-        $exitCode = [int]$LASTEXITCODE
+    try {
+        # Use Start-Process -Wait for GUI applications so PowerShell waits
+        # until the benchmark process actually exits.
+        $proc = Start-Process -FilePath $exeFull -ArgumentList "--benchmark-ci" -PassThru -Wait -WindowStyle Hidden
+        $exitCode = [int]$proc.ExitCode
+    }
+    catch {
+        $failures.Add("attempt ${attempt}: failed to start benchmark process: $($_.Exception.Message)") | Out-Null
+        continue
     }
 
     $report = Get-LatestBenchmarkReport -Directory $benchDir
