@@ -16,6 +16,7 @@ CMakeSettings.json
 target/
 .agent/
 AGENTS.md
+docs/
 research/
 .claude
 _codeql_build_dir
