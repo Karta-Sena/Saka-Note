@@ -19,6 +19,78 @@ ULONGLONG EstimateSessionWideStringBytes(size_t charCount)
     return static_cast<ULONGLONG>(sizeof(DWORD)) +
            static_cast<ULONGLONG>(charCount) * static_cast<ULONGLONG>(sizeof(wchar_t));
 }
+
+bool EstimateSessionSerializedBytesRange(const std::vector<DocumentTabState> &documents,
+                                         size_t firstDocumentIndex,
+                                         DWORD docCount,
+                                         DWORD maxFileBytes,
+                                         ULONGLONG &outBytes)
+{
+    const size_t count = static_cast<size_t>(docCount);
+    if (firstDocumentIndex > documents.size() || count > (documents.size() - firstDocumentIndex))
+        return false;
+
+    ULONGLONG total = static_cast<ULONGLONG>(sizeof(DWORD)) * 4u;
+    const ULONGLONG maxBytes = static_cast<ULONGLONG>(maxFileBytes);
+    if (total > maxBytes)
+        return false;
+
+    for (DWORD i = 0; i < docCount; ++i)
+    {
+        const DocumentTabState &doc = documents[firstDocumentIndex + static_cast<size_t>(i)];
+        const bool persistText = doc.filePath.empty() || doc.modified;
+        const ULONGLONG recordBytes = static_cast<ULONGLONG>(sizeof(DWORD)) * 3u +
+                                      EstimateSessionWideStringBytes(doc.filePath.size()) +
+                                      EstimateSessionWideStringBytes(persistText ? doc.text.size() : 0u);
+        if (recordBytes > (maxBytes - total))
+            return false;
+        total += recordBytes;
+    }
+
+    outBytes = total;
+    return true;
+}
+
+struct SnapshotWriteWindow
+{
+    size_t firstDocumentIndex = 0;
+    DWORD documentCount = 0;
+    DWORD activeDocumentIndex = 0xFFFFFFFFu;
+};
+
+SnapshotWriteWindow BuildSnapshotWriteWindow(const std::vector<DocumentTabState> &documents,
+                                             int activeDocument,
+                                             DWORD maxDocuments)
+{
+    SnapshotWriteWindow window;
+    window.documentCount = static_cast<DWORD>((std::min)(documents.size(), static_cast<size_t>(maxDocuments)));
+    if (window.documentCount == 0)
+        return window;
+
+    const size_t totalDocs = documents.size();
+    if (totalDocs > static_cast<size_t>(window.documentCount) &&
+        activeDocument >= 0 &&
+        static_cast<size_t>(activeDocument) < totalDocs)
+    {
+        const size_t activeIndex = static_cast<size_t>(activeDocument);
+        const size_t cappedCount = static_cast<size_t>(window.documentCount);
+        if (activeIndex >= cappedCount)
+        {
+            const size_t maxStart = totalDocs - cappedCount;
+            const size_t desiredStart = activeIndex + 1u - cappedCount;
+            window.firstDocumentIndex = (std::min)(desiredStart, maxStart);
+        }
+    }
+
+    if (activeDocument >= 0 &&
+        static_cast<size_t>(activeDocument) >= window.firstDocumentIndex &&
+        static_cast<size_t>(activeDocument) < (window.firstDocumentIndex + static_cast<size_t>(window.documentCount)))
+    {
+        window.activeDocumentIndex = static_cast<DWORD>(static_cast<size_t>(activeDocument) - window.firstDocumentIndex);
+    }
+
+    return window;
+}
 }
 
 bool SessionWriteTabDocumentRecord(HANDLE hFile, const DocumentTabState &doc, DWORD maxChars)
@@ -178,25 +250,7 @@ bool EstimateSessionSerializedBytes(const std::vector<DocumentTabState> &documen
                                     DWORD maxFileBytes,
                                     ULONGLONG &outBytes)
 {
-    ULONGLONG total = static_cast<ULONGLONG>(sizeof(DWORD)) * 4u;
-    const ULONGLONG maxBytes = static_cast<ULONGLONG>(maxFileBytes);
-    if (total > maxBytes)
-        return false;
-
-    for (DWORD i = 0; i < docCount; ++i)
-    {
-        const DocumentTabState &doc = documents[i];
-        const bool persistText = doc.filePath.empty() || doc.modified;
-        const ULONGLONG recordBytes = static_cast<ULONGLONG>(sizeof(DWORD)) * 3u +
-                                      EstimateSessionWideStringBytes(doc.filePath.size()) +
-                                      EstimateSessionWideStringBytes(persistText ? doc.text.size() : 0u);
-        if (recordBytes > (maxBytes - total))
-            return false;
-        total += recordBytes;
-    }
-
-    outBytes = total;
-    return true;
+    return EstimateSessionSerializedBytesRange(documents, 0, docCount, maxFileBytes, outBytes);
 }
 
 bool SessionWriteSnapshot(const std::wstring &sessionFilePath,
@@ -208,9 +262,10 @@ bool SessionWriteSnapshot(const std::wstring &sessionFilePath,
                           DWORD maxStringChars,
                           DWORD maxFileBytes)
 {
-    const DWORD docCount = static_cast<DWORD>((std::min)(documents.size(), static_cast<size_t>(maxDocuments)));
+    const SnapshotWriteWindow window = BuildSnapshotWriteWindow(documents, activeDocument, maxDocuments);
+
     ULONGLONG estimatedBytes = 0;
-    if (!EstimateSessionSerializedBytes(documents, docCount, maxFileBytes, estimatedBytes))
+    if (!EstimateSessionSerializedBytesRange(documents, window.firstDocumentIndex, window.documentCount, maxFileBytes, estimatedBytes))
     {
         DeleteFileW(sessionFilePath.c_str());
         return false;
@@ -221,16 +276,12 @@ bool SessionWriteSnapshot(const std::wstring &sessionFilePath,
     if (hFile == INVALID_HANDLE_VALUE)
         return false;
 
-    DWORD activeDocIndex = 0xFFFFFFFFu;
-    if (activeDocument >= 0 && activeDocument < static_cast<int>(docCount))
-        activeDocIndex = static_cast<DWORD>(activeDocument);
-
     bool ok = SessionWriteUInt32(hFile, sessionMagic) &&
               SessionWriteUInt32(hFile, sessionVersion) &&
-              SessionWriteUInt32(hFile, docCount) &&
-              SessionWriteUInt32(hFile, activeDocIndex);
-    for (DWORD i = 0; ok && i < docCount; ++i)
-        ok = SessionWriteTabDocumentRecord(hFile, documents[i], maxStringChars);
+              SessionWriteUInt32(hFile, window.documentCount) &&
+              SessionWriteUInt32(hFile, window.activeDocumentIndex);
+    for (DWORD i = 0; ok && i < window.documentCount; ++i)
+        ok = SessionWriteTabDocumentRecord(hFile, documents[window.firstDocumentIndex + static_cast<size_t>(i)], maxStringChars);
 
     CloseHandle(hFile);
     if (!ok)

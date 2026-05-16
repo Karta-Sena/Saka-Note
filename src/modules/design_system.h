@@ -10,9 +10,9 @@
 
 namespace DesignSystem
 {
-inline constexpr wchar_t kUiFontPrimary[] = L"General Sans";
-inline constexpr wchar_t kUiFontPrimaryMedium[] = L"General Sans Medium";
-inline constexpr wchar_t kUiFontPrimarySemibold[] = L"General Sans Semibold";
+inline constexpr wchar_t kUiFontPrimary[] = L"iA Writer Quattro S";
+inline constexpr wchar_t kUiFontPrimaryMedium[] = L"iA Writer Quattro S";
+inline constexpr wchar_t kUiFontPrimarySemibold[] = L"iA Writer Quattro S";
 inline constexpr wchar_t kUiFontFallback[] = L"Consolas";
 
 inline constexpr int kChromeFontPointSize = 9;
@@ -86,7 +86,7 @@ inline constexpr unsigned long kLightEdge    = 0x8F8F8F; // #8F8F8F  borders / s
 inline constexpr unsigned long kLightSurface = 0xE6E8E8; // #E8E8E6  elevated surface (cards, containers)
 
 // ── Accent — change this to rebrand ────────────────────────────────
-// Current brand: Blueprint Blue #001AE2  →  COLORREF 0xE21A00
-inline constexpr unsigned long kAccent = 0xE21A00; // #001AE2  Blueprint Blue
+// Current brand: Otso Beige #EFDCAC  →  COLORREF 0xACDCEF
+inline constexpr unsigned long kAccent = 0xACDCEF; // #EFDCAC  Otso Beige
 }
 }

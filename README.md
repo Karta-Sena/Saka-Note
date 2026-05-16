@@ -4,7 +4,7 @@
   <img src="assets/icons/otso_icon.png" alt="Otso" width="320">
 </p>
 
-**Otso** is a high-fidelity, Win32 text editor focused on speed, stability, and the "Renaissance of Software" craftsmanship.
+**Otso** is a high-fidelity, Win32 text editor focused on speed, stability, and the "Renaissance of Software" craftsmanship. Now aligned with the Otso Design Language (v2.2.1).
 
 **Otso** adalah editor teks Win32 beresolusi tinggi yang berfokus pada kecepatan, stabilitas, dan keahlian rekayasa perangkat lunak "Renaissance".
 
@@ -28,24 +28,28 @@
 
 ## Build (Desktop)
 
-Quick start via presets:
+Quick start using automation scripts:
 
 ```powershell
-cmake --preset mingw-debug --fresh
-cmake --build --preset mingw-debug
-ctest --preset mingw-debug
+# Compile and Build
+.\build_otso.bat
+ 
+# Generate Installer (Requires NSIS)
+.\pack_otso.bat
 ```
 
-Alternative helper script:
+For manual CMake control:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\dev-build.ps1 -Config Debug -RunTests
+cmake -B build-nmake -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build-nmake
+ctest -C Release --test-dir build-nmake
 ```
 
 ## Runtime Benchmark
 
 ```powershell
-.\build\mingw-debug\Otso.exe --benchmark-ci
+.\build-nmake\Otso.exe --benchmark-ci
 ```
 
 Benchmark reports are written to:

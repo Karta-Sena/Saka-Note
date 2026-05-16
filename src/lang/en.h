@@ -105,7 +105,7 @@ inline LangStrings g_langEN = {
     L"Cannot open file.",
     L"Cannot save file.",
     L"Error",
-    L"Otso v1.1.0\n\nA lightweight Win32 text editor focused on speed, stability, and clarity.\n", //\nModify by 0x2o.net",
+    L"Otso v2.2.1\n\nA lightweight Win32 text editor focused on speed, stability, and clarity.\n", //\nModify by 0x2o.net",
     L"Cannot load RichEdit control.",
     L"Close other tabs first, then disable tab mode.",
     L"The line number is beyond the total number of lines.",

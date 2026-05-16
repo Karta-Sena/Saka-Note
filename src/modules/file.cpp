@@ -13,8 +13,86 @@
 #include "settings.h"
 #include "resource.h"
 #include <shlwapi.h>
+#include <richedit.h>
 #include <algorithm>
 #include <cwctype>
+
+namespace
+{
+class ScopedEditorEventMaskSilencer
+{
+public:
+    explicit ScopedEditorEventMaskSilencer(HWND hwndEditor)
+        : m_hwndEditor(hwndEditor)
+    {
+        if (!m_hwndEditor)
+            return;
+        m_originalMask = SendMessageW(m_hwndEditor, EM_GETEVENTMASK, 0, 0);
+        SendMessageW(m_hwndEditor, EM_SETEVENTMASK, 0, 0);
+    }
+
+    ~ScopedEditorEventMaskSilencer()
+    {
+        if (!m_hwndEditor)
+            return;
+        SendMessageW(m_hwndEditor, EM_SETEVENTMASK, 0, m_originalMask);
+    }
+
+private:
+    HWND m_hwndEditor = nullptr;
+    LPARAM m_originalMask = 0;
+};
+
+class ScopedEditorRedrawSuspender
+{
+public:
+    explicit ScopedEditorRedrawSuspender(HWND hwndEditor)
+        : m_hwndEditor(hwndEditor)
+    {
+        if (!m_hwndEditor)
+            return;
+        SendMessageW(m_hwndEditor, WM_SETREDRAW, FALSE, 0);
+        m_suspended = true;
+    }
+
+    ~ScopedEditorRedrawSuspender()
+    {
+        if (!m_suspended || !m_hwndEditor)
+            return;
+        SendMessageW(m_hwndEditor, WM_SETREDRAW, TRUE, 0);
+        RedrawWindow(m_hwndEditor, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+    }
+
+private:
+    HWND m_hwndEditor = nullptr;
+    bool m_suspended = false;
+};
+
+class ScopedEditorUndoSilencer
+{
+public:
+    explicit ScopedEditorUndoSilencer(HWND hwndEditor)
+        : m_hwndEditor(hwndEditor)
+    {
+        if (!m_hwndEditor)
+            return;
+        m_previousLimit = SendMessageW(m_hwndEditor, EM_SETUNDOLIMIT, 0, 0);
+        m_silenced = true;
+    }
+
+    ~ScopedEditorUndoSilencer()
+    {
+        if (!m_silenced || !m_hwndEditor)
+            return;
+        SendMessageW(m_hwndEditor, EM_SETUNDOLIMIT, static_cast<WPARAM>(m_previousLimit), 0);
+    }
+
+private:
+    HWND m_hwndEditor = nullptr;
+    LRESULT m_previousLimit = 0;
+    bool m_silenced = false;
+};
+}
 
 static bool ShouldUseLargeFileMode(size_t bytes)
 {
@@ -140,7 +218,14 @@ bool LoadFile(const std::wstring &path)
     if (wrapModeChanged)
         ApplyWordWrap();
 
-    SetEditorText(text);
+    {
+        ScopedEditorEventMaskSilencer silenceEvents(g_hwndEditor);
+        ScopedEditorRedrawSuspender suspendRedraw(g_hwndEditor);
+        ScopedEditorUndoSilencer silenceUndo(g_hwndEditor);
+        SetEditorText(text);
+        SendMessageW(g_hwndEditor, EM_EMPTYUNDOBUFFER, 0, 0);
+        SendMessageW(g_hwndEditor, EM_SETMODIFY, FALSE, 0);
+    }
     g_state.filePath = path;
     g_state.encoding = enc;
     g_state.lineEnding = le;

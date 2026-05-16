@@ -1,4 +1,8 @@
 build/
+build-nmake/
+build-vs/
+_CPack_Packages/
+dist/
 build_old/
 *.exe
 *.obj
@@ -30,6 +34,7 @@ replay_pid*.log
 # Temporary audit/workspace noise
 .tmp-skill-audit-*/
 scratch/
+
 folder_docs.html
 
 # Keep source repo clean; publish binaries via GitHub Releases

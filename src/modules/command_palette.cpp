@@ -16,6 +16,7 @@
 #include "design_system.h"
 #include "theme.h"
 #include "tab_layout.h"
+#include "squircle.h"
 #include "../core/globals.h"
 #include "../lang/lang.h"
 #include <algorithm>
@@ -469,8 +470,18 @@ LRESULT CALLBACK CommandPalette::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, 
                 const float maxTop = yBase + (resultCount - 1) * kItemH;
                 const float animatedTop = std::clamp(s->selectionVisualTop, minTop, maxTop);
                 D2D1_RECT_F selRect = D2D1::RectF(8.0f, animatedTop, w - 8.0f, animatedTop + kItemH);
-                D2D1_ROUNDED_RECT roundedSel = D2D1::RoundedRect(selRect, 8.0f, 8.0f);
-                ctx->FillRoundedRectangle(roundedSel, brSelBg);
+                const bool squircleDrawn = Squircle::FillSuperellipseD2D(
+                    ctx,
+                    s->engine.GetFactory(),
+                    selRect,
+                    brSelBg,
+                    4.0f,
+                    16);
+                if (!squircleDrawn)
+                {
+                    D2D1_ROUNDED_RECT roundedSel = D2D1::RoundedRect(selRect, 8.0f, 8.0f);
+                    ctx->FillRoundedRectangle(roundedSel, brSelBg);
+                }
             }
 
             for (int i = 0; i < resultCount; ++i) {

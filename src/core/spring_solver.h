@@ -6,6 +6,9 @@
 */
 
 #pragma once
+ 
+#include <cmath>
+
 
 namespace Core
 {

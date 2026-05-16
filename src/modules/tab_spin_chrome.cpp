@@ -8,6 +8,7 @@
 
 #include <windowsx.h>
 #include "theme.h"
+#include "squircle.h"
 
 #include <algorithm>
 #include <gdiplus.h>
@@ -63,7 +64,15 @@ LRESULT CALLBACK TabSpinSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             else if (hover)
                 bg = palette.hoverBg;
 
-            FillSolidRectDc(hdc, r, bg);
+            if (press || hover)
+            {
+                RECT shellRect = r;
+                const int inset = 1;
+                InflateRect(&shellRect, -inset, -inset);
+                const bool squircleDrawn = Squircle::FillSuperellipseDc(hdc, shellRect, bg, 4.0, 14);
+                if (!squircleDrawn)
+                    FillSolidRectDc(hdc, shellRect, bg);
+            }
 
             if (!EnsureBackgroundGraphicsReady())
                 return;

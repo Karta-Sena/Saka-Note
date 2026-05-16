@@ -39,14 +39,18 @@
 #include "modules/tab_layout.h"
 #include "modules/tab_model_ops.h"
 #include "modules/tab_session_io.h"
+#include "modules/session_policy.h"
 #include "modules/design_system.h"
 #include "modules/premium_orchestrator.h"
 #include "modules/tab_spin_chrome.h"
 #include "modules/custom_scrollbar.h"
 #include "modules/selection_aura.h"
 #include "modules/command_palette.h"
+#include "modules/squircle.h"
 #include "core/spring_solver.h"
 #include "lang/lang.h"
+
+
 
 static std::wstring MenuLabelForContext(const std::wstring &menuText)
 {
@@ -71,14 +75,6 @@ static int g_hoverTabIndex = -1;
 static bool g_hoverTabClose = false;
 static bool g_trackingTabsMouse = false;
 static bool g_tabsCustomDrawObserved = false;
-static constexpr DWORD kSessionMagic = 0x4C4E5331; // "LNS1"
-static constexpr DWORD kSessionVersion = 1;
-static constexpr DWORD kSessionMaxDocuments = 64;
-static constexpr DWORD kSessionMaxStringChars = 8 * 1024 * 1024;
-static constexpr DWORD kSessionMaxFileBytes = 64 * 1024 * 1024;
-static constexpr UINT_PTR kSessionAutosaveTimerId = 0x4C4E01;
-static constexpr UINT kSessionAutosaveIntervalMs = 1500;
-static constexpr DWORD kSessionRetryBackoffMs = 10000;
 static constexpr bool kEnableCommandBar = false;
 static bool g_sessionDirty = false;
 static bool g_sessionPersisting = false;
@@ -138,16 +134,10 @@ static void LoadBundledFonts()
         return;
 
     static constexpr const wchar_t *kBundledFontFiles[] = {
-        L"GeneralSans-Regular.otf",
-        L"GeneralSans-Medium.otf",
-        L"GeneralSans-Semibold.otf",
-        L"GeneralSans-Bold.otf",
-        L"GeneralSans-Italic.otf",
-        L"GeneralSans-MediumItalic.otf",
-        L"GeneralSans-SemiboldItalic.otf",
-        L"GeneralSans-BoldItalic.otf",
-        L"GeneralSans-Light.otf",
-        L"GeneralSans-LightItalic.otf",
+        L"ia_writer_quattro_s_regular.ttf",
+        L"ia_writer_quattro_s_bold.ttf",
+        L"ia_writer_quattro_s_italic.ttf",
+        L"ia_writer_quattro_s_bold_italic.ttf",
         L"AkkuratMonoLL-Regular.ttf",
         L"AkkuratMonoLL-Bold.ttf",
         L"AkkuratMonoLL-Italic.ttf",
@@ -196,7 +186,7 @@ static HFONT BuildChromeUiFont()
 
     LOGFONTW lf{};
     lf.lfHeight = -MulDiv(DesignSystem::kChromeFontPointSize, dpiY, 72);
-    lf.lfWeight = FW_MEDIUM;
+    lf.lfWeight = FW_NORMAL;
     lf.lfQuality = CLEARTYPE_QUALITY;
     wcscpy_s(lf.lfFaceName, DesignSystem::kUiFontPrimaryMedium);
 
@@ -242,9 +232,9 @@ static void UpdateSessionAutosaveTimer()
         return;
 
     if (g_state.startupBehavior == StartupBehavior::ResumeAll)
-        SetTimer(g_hwndMain, kSessionAutosaveTimerId, kSessionAutosaveIntervalMs, nullptr);
+        SetTimer(g_hwndMain, SessionPolicy::kAutosaveTimerId, SessionPolicy::kAutosaveIntervalMs, nullptr);
     else
-        KillTimer(g_hwndMain, kSessionAutosaveTimerId);
+        KillTimer(g_hwndMain, SessionPolicy::kAutosaveTimerId);
 }
 
 static constexpr UINT_PTR kCommandBarButtonIds[] = {
@@ -283,6 +273,16 @@ static std::wstring CommandBarLabelForId(UINT_PTR id)
 static void RefreshCommandBarLabels();
 static bool GetTabBackgroundRect(int index, RECT &bgRect);
 static bool GetTabInteractionRect(int index, RECT &interRect);
+
+static bool ShouldCaptureFullTextSnapshot()
+{
+    return g_state.modified || g_state.filePath.empty();
+}
+
+static bool ShouldCaptureRichTextSnapshot(const DocumentTabState &doc)
+{
+    return !g_state.largeFileMode && (ShouldCaptureFullTextSnapshot() || doc.hasRichText);
+}
 
 static void RefreshCommandBarLabels()
 {
@@ -711,8 +711,23 @@ static void SyncDocumentFromState(int index, bool includeText)
     const bool tabLabelChanged = (doc.filePath != g_state.filePath) || (doc.modified != g_state.modified);
     if (includeText)
     {
-        doc.text = GetEditorText();
-        if (!g_state.largeFileMode)
+        const bool captureFullText = ShouldCaptureFullTextSnapshot();
+        if (captureFullText)
+        {
+            doc.text = GetEditorText();
+            doc.needsReloadFromDisk = false;
+        }
+        else if (doc.text.empty() && !g_state.filePath.empty())
+        {
+            // Avoid expensive stream-out for clean files; reload lazily from disk when needed.
+            doc.needsReloadFromDisk = true;
+        }
+        else
+        {
+            doc.needsReloadFromDisk = false;
+        }
+
+        if (ShouldCaptureRichTextSnapshot(doc))
         {
             doc.richText = GetEditorRichText();
             doc.hasRichText = !doc.richText.empty();
@@ -722,7 +737,6 @@ static void SyncDocumentFromState(int index, bool includeText)
             doc.richText.clear();
             doc.hasRichText = false;
         }
-        doc.needsReloadFromDisk = false;
     }
     doc.filePath = g_state.filePath;
     doc.modified = g_state.modified;
@@ -960,16 +974,22 @@ static bool SaveOpenDocumentSession(bool persistPathFallback)
     if (g_activeDocument >= 0 && g_activeDocument < static_cast<int>(g_documents.size()))
     {
         DocumentTabState &activeDoc = g_documents[g_activeDocument];
-        if (g_state.modified || g_state.filePath.empty())
+        const bool captureFullText = ShouldCaptureFullTextSnapshot();
+        if (captureFullText)
         {
             activeDoc.text = GetEditorText();
             activeDoc.needsReloadFromDisk = false;
+        }
+        else if (activeDoc.text.empty() && !g_state.filePath.empty())
+        {
+            activeDoc.needsReloadFromDisk = true;
         }
         else
         {
             activeDoc.needsReloadFromDisk = false;
         }
-        if (!g_state.largeFileMode)
+
+        if (ShouldCaptureRichTextSnapshot(activeDoc))
         {
             activeDoc.richText = GetEditorRichText();
             activeDoc.hasRichText = !activeDoc.richText.empty();
@@ -1007,11 +1027,11 @@ static bool SaveOpenDocumentSession(bool persistPathFallback)
         saveOk = SessionWriteSnapshot(sessionFilePath,
                                       g_documents,
                                       g_activeDocument,
-                                      kSessionMagic,
-                                      kSessionVersion,
-                                      kSessionMaxDocuments,
-                                      kSessionMaxStringChars,
-                                      kSessionMaxFileBytes);
+                                      SessionPolicy::kMagic,
+                                      SessionPolicy::kVersion,
+                                      SessionPolicy::MaxDocuments(g_state),
+                                      SessionPolicy::kMaxStringChars,
+                                      SessionPolicy::kMaxFileBytes);
     }
     else
     {
@@ -1043,11 +1063,11 @@ static bool RestoreOpenDocumentSession()
         TabSessionSnapshot snapshot;
         if (SessionReadSnapshot(sessionFilePath,
                                 snapshot,
-                                kSessionMagic,
-                                kSessionVersion,
-                                kSessionMaxDocuments,
-                                kSessionMaxStringChars,
-                                kSessionMaxFileBytes,
+                                SessionPolicy::kMagic,
+                                SessionPolicy::kVersion,
+                                SessionPolicy::MaxDocuments(g_state),
+                                SessionPolicy::kMaxStringChars,
+                                SessionPolicy::kMaxFileBytes,
                                 true))
         {
             g_documents = std::move(snapshot.documents);
@@ -1385,11 +1405,16 @@ static LRESULT HandleCommandBarCustomDraw(LPNMTBCUSTOMDRAW draw)
         InflateRect(&rc, -hoverInset, -hoverInset);
     if (checked || hot)
     {
-        HBRUSH hbrItem = CreateSolidBrush(checked ? palette.checkedBg : palette.hoverBg);
-        if (hbrItem)
+        const COLORREF itemColor = checked ? palette.checkedBg : palette.hoverBg;
+        const bool squircleDrawn = Squircle::FillSuperellipseDc(draw->nmcd.hdc, rc, itemColor, 4.0, 18);
+        if (!squircleDrawn)
         {
-            FillRect(draw->nmcd.hdc, &rc, hbrItem);
-            DeleteObject(hbrItem);
+            HBRUSH hbrItem = CreateSolidBrush(itemColor);
+            if (hbrItem)
+            {
+                FillRect(draw->nmcd.hdc, &rc, hbrItem);
+                DeleteObject(hbrItem);
+            }
         }
     }
 
@@ -1653,9 +1678,23 @@ static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const
     const int stroke = std::max(1, TabScalePx(DesignSystem::kTabSeamStrokePx));
     const COLORREF selectedBg = palette.activeBg;
     const COLORREF itemBg = selected ? selectedBg : (hovered ? palette.hoverBg : palette.inactiveBg);
-    FillSolidRectDc(hdc, contentRect, itemBg);
+    const bool useSquircleShell = selected || hovered;
+    if (useSquircleShell)
+    {
+        RECT shellRect = contentRect;
+        const int insetX = std::max(0, TabScalePx(1));
+        const int insetY = std::max(0, TabScalePx(1));
+        InflateRect(&shellRect, -insetX, -insetY);
+        const bool squircleDrawn = Squircle::FillSuperellipseDc(hdc, shellRect, itemBg, 4.0, 18);
+        if (!squircleDrawn)
+            FillSolidRectDc(hdc, contentRect, itemBg);
+    }
+    else
+    {
+        FillSolidRectDc(hdc, contentRect, itemBg);
+    }
 
-    if (index > 0)
+    if (index > 0 && !useSquircleShell)
     {
         RECT separator = contentRect;
         const int inset = TabScalePx(DesignSystem::kTabSeparatorInsetYPx);
@@ -1713,7 +1752,11 @@ static void DrawTabItemVisual(HDC hdc, int index, const RECT &rawItemRect, const
         const bool closeHovered = g_hoverTabClose && (index == g_hoverTabIndex);
 
         if (closeHovered)
-            FillSolidRectDc(hdc, closeRect, palette.closeHoverBg);
+        {
+            const bool closeSquircle = Squircle::FillSuperellipseDc(hdc, closeRect, palette.closeHoverBg, 4.0, 12);
+            if (!closeSquircle)
+                FillSolidRectDc(hdc, closeRect, palette.closeHoverBg);
+        }
 
         const COLORREF closeColor = closeHovered
                                         ? DesignSystem::Color::kAccent
@@ -2466,7 +2509,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_TIMER:
         if (PremiumOrchestrator::OnTimer(hwnd, wParam))
             return 0;
-        if (wParam == kSessionAutosaveTimerId)
+        if (wParam == SessionPolicy::kAutosaveTimerId)
         {
             if (g_sessionDirty && !g_state.closing)
             {
@@ -2487,7 +2530,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 }
                 else
                 {
-                    g_sessionRetryAtTick = GetTickCount() + kSessionRetryBackoffMs;
+                    g_sessionRetryAtTick = GetTickCount() + SessionPolicy::kRetryBackoffMs;
                 }
             }
             return 0;
@@ -2837,7 +2880,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             }
             g_state.windowMaximized = (placement.showCmd == SW_SHOWMAXIMIZED);
         }
-        KillTimer(hwnd, kSessionAutosaveTimerId);
+        KillTimer(hwnd, SessionPolicy::kAutosaveTimerId);
         PremiumOrchestrator::Shutdown(hwnd);
         TabSpinDetach();
         SaveOpenDocumentSession(true);

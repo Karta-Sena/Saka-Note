@@ -13,7 +13,7 @@
 #include <deque>
 
 #define APP_NAME L"Otso"
-#define APP_VERSION L"1.1.0"
+#define APP_VERSION L"2.2.1"
 #define APP_GITHUB_OWNER L"wisesakarta"
 #define APP_GITHUB_REPO L"Otso"
 #define APP_REPOSITORY_URL L"https://github.com/wisesakarta/otso"
@@ -22,6 +22,9 @@
 #define ZOOM_DEFAULT 100
 #define MAX_RECENT_FILES 10
 constexpr size_t LARGE_FILE_MODE_THRESHOLD_BYTES = 5u * 1024u * 1024u;
+constexpr DWORD SESSION_MAX_DOCUMENTS_DEFAULT = 64u;
+constexpr DWORD SESSION_MAX_DOCUMENTS_MIN = 8u;
+constexpr DWORD SESSION_MAX_DOCUMENTS_MAX = 256u;
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
@@ -136,6 +139,7 @@ struct AppState
     BackgroundSettings background;
     bool useTabs = true;
     StartupBehavior startupBehavior = StartupBehavior::ResumeAll;
+    DWORD sessionMaxDocuments = SESSION_MAX_DOCUMENTS_DEFAULT;
     bool largeFileMode = false;
     size_t largeFileBytes = 0;
 };

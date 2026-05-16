@@ -44,13 +44,14 @@
 #define WINDOW_MAXIMIZED_VALUE L"WindowMaximized"
 #define USE_TABS_VALUE L"UseTabs"
 #define STARTUP_BEHAVIOR_VALUE L"StartupBehavior"
+#define SESSION_MAX_DOCUMENTS_VALUE L"SessionMaxDocuments"
 #define SETTINGS_SCHEMA_VERSION 2
 #define MIN_FONT_SIZE 8
 #define MAX_FONT_SIZE 72
 #define MIN_WINDOW_OPACITY 26
 #define MIN_WINDOW_SIZE 200
 #define MAX_WINDOW_SIZE 16384
-#define MAX_OPEN_TABS 64
+#define MAX_OPEN_TABS_DEFAULT 64
 
 static bool ReadDwordValue(HKEY hKey, const wchar_t *name, DWORD &outValue)
 {
@@ -240,6 +241,9 @@ void LoadFontSettings()
                 g_state.startupBehavior = static_cast<StartupBehavior>(dwordValue);
         }
 
+        if (ReadDwordValue(hKey, SESSION_MAX_DOCUMENTS_VALUE, dwordValue))
+            g_state.sessionMaxDocuments = std::clamp(dwordValue, SESSION_MAX_DOCUMENTS_MIN, SESSION_MAX_DOCUMENTS_MAX);
+
         std::vector<std::wstring> recentFiles;
         if (ReadMultiSzValue(hKey, RECENT_FILES_VALUE, recentFiles, MAX_RECENT_FILES))
             g_state.recentFiles.assign(recentFiles.begin(), recentFiles.end());
@@ -282,6 +286,7 @@ void SaveFontSettings()
         WriteDwordValue(hKey, WINDOW_MAXIMIZED_VALUE, g_state.windowMaximized ? 1 : 0);
         WriteDwordValue(hKey, USE_TABS_VALUE, g_state.useTabs ? 1 : 0);
         WriteDwordValue(hKey, STARTUP_BEHAVIOR_VALUE, static_cast<DWORD>(g_state.startupBehavior));
+        WriteDwordValue(hKey, SESSION_MAX_DOCUMENTS_VALUE, std::clamp(g_state.sessionMaxDocuments, SESSION_MAX_DOCUMENTS_MIN, SESSION_MAX_DOCUMENTS_MAX));
 
         std::vector<std::wstring> recentFiles(g_state.recentFiles.begin(), g_state.recentFiles.end());
         WriteMultiSzValue(hKey, RECENT_FILES_VALUE, recentFiles);
@@ -315,7 +320,9 @@ void LoadOpenTabsSession(std::vector<std::wstring> &tabPaths, int &activeTabInde
     if (RegOpenKeyExW(HKEY_CURRENT_USER, SETTINGS_KEY, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
         return;
 
-    ReadMultiSzValue(hKey, OPEN_TABS_VALUE, tabPaths, MAX_OPEN_TABS);
+    const size_t maxOpenTabs = static_cast<size_t>(
+        std::clamp(g_state.sessionMaxDocuments, SESSION_MAX_DOCUMENTS_MIN, SESSION_MAX_DOCUMENTS_MAX));
+    ReadMultiSzValue(hKey, OPEN_TABS_VALUE, tabPaths, maxOpenTabs > 0 ? maxOpenTabs : static_cast<size_t>(MAX_OPEN_TABS_DEFAULT));
 
     DWORD activeIndexValue = 0;
     if (ReadDwordValue(hKey, ACTIVE_TAB_INDEX_VALUE, activeIndexValue))

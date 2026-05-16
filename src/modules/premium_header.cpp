@@ -34,7 +34,7 @@ namespace Premium
         pDW->CreateTextFormat(
             DesignSystem::kUiFontPrimary,
             nullptr,
-            DWRITE_FONT_WEIGHT_BOLD,
+            DWRITE_FONT_WEIGHT_REGULAR,
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
             14.0f,

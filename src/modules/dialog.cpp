@@ -158,29 +158,13 @@ INT_PTR HandleAboutPaint(HWND hWnd)
     const COLORREF bgColor = dark ? DesignSystem::Color::kDarkBg : DesignSystem::Color::kLightBg;
     FillSolidRectDc(hdc, rcClient, bgColor);
 
-    // ---------- Logo container (squircle-style rounded rect) ----------
+    // ---------- Logo ----------
     const int iconSize   = ScaleDialogPx(96);
     const int containerSize = ScaleDialogPx(120);
     const int containerX = (rcClient.right - containerSize) / 2;
     const int containerY = ScaleDialogPx(40);
 
-    // Container fill: slightly elevated surface
-    const COLORREF containerColor = dark ? DesignSystem::Color::kDarkSurface : DesignSystem::Color::kLightSurface;
-    HBRUSH hContainerBrush = CreateSolidBrush(containerColor);
-    RECT rcContainer = { containerX, containerY,
-                         containerX + containerSize, containerY + containerSize };
-    // Rounded rect to approximate squircle feel
-    HPEN hNullPen = (HPEN)GetStockObject(NULL_PEN);
-    HPEN hOldPen = (HPEN)SelectObject(hdc, hNullPen);
-    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hContainerBrush);
-    const int radius = ScaleDialogPx(22);
-    RoundRect(hdc, rcContainer.left, rcContainer.top,
-                   rcContainer.right, rcContainer.bottom, radius, radius);
-    SelectObject(hdc, hOldBrush);
-    SelectObject(hdc, hOldPen);
-    DeleteObject(hContainerBrush);
-
-    // Icon centered inside container
+    // Icon only (background container removed per branding redesign prep)
     const int iconId = dark ? IDI_IN_APP_ICON_DARK : IDI_IN_APP_ICON_LIGHT;
     HICON hIcon = (HICON)LoadImageW(GetModuleHandleW(nullptr),
                                     MAKEINTRESOURCEW(iconId),

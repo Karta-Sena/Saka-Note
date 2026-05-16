@@ -1,4 +1,4 @@
-﻿name: Build and Release
+name: Build and Release
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
       - name: Binary Size Gate
         shell: pwsh
         run: |
-          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/otso.exe"
+          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/Otso.exe"
           $sizeBytes = (Get-Item $exe).Length
           $limitMb = 8
           $limitBytes = $limitMb * 1MB
@@ -53,7 +53,7 @@ jobs:
         if: matrix.arch == 'x64' && github.ref == 'refs/heads/main'
         shell: pwsh
         run: |
-          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/otso.exe"
+          $exe = Resolve-Path "build-${{ matrix.arch }}/Release/Otso.exe"
           & "./tools/benchmark-gate.ps1" `
             -ExePath $exe `
             -MaxAttempts 3 `
@@ -78,13 +78,13 @@ jobs:
       - name: Collect Setup Installer
         shell: pwsh
         run: |
-          $installer = Get-ChildItem -Path "." -File -Filter "otso-*-${{ matrix.arch }}.exe" |
+          $installer = Get-ChildItem -Path "." -File -Filter "Otso-*-${{ matrix.arch }}.exe" |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
           if (-not $installer) {
             throw "NSIS installer not found for architecture ${{ matrix.arch }}."
           }
-          Copy-Item $installer.FullName "build-${{ matrix.arch }}/otso-setup-${{ matrix.arch }}.exe" -Force
+          Copy-Item $installer.FullName "build-${{ matrix.arch }}/Otso-setup-${{ matrix.arch }}.exe" -Force
 
       - name: Create Portable Zip
         shell: pwsh
@@ -92,7 +92,7 @@ jobs:
           $stage = "build-${{ matrix.arch }}/portable-stage"
           $zip = "build-${{ matrix.arch }}/otso-portable-${{ matrix.arch }}.zip"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item "build-${{ matrix.arch }}/Release/otso.exe" "$stage/otso.exe" -Force
+          Copy-Item "build-${{ matrix.arch }}/Release/Otso.exe" "$stage/Otso.exe" -Force
           Copy-Item "LICENSE" "$stage/LICENSE.txt" -Force
           Copy-Item "README.md" "$stage/README.md" -Force
           Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
@@ -103,8 +103,8 @@ jobs:
           name: otso-${{ matrix.arch }}
           if-no-files-found: ignore
           path: |
-            build-${{ matrix.arch }}/otso-setup-${{ matrix.arch }}.exe
-            build-${{ matrix.arch }}/otso-portable-${{ matrix.arch }}.zip
+            build-${{ matrix.arch }}/Otso-setup-${{ matrix.arch }}.exe
+            build-${{ matrix.arch }}/Otso-portable-${{ matrix.arch }}.zip
             build-${{ matrix.arch }}/benchmark-reports/benchmark-*.txt
 
   release:
@@ -125,8 +125,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/**/otso-setup-*.exe
-            artifacts/**/otso-portable-*.zip
+            artifacts/**/Otso-setup-*.exe
+            artifacts/**/Otso-portable-*.zip
             artifacts/**/benchmark-*.txt
             release-sha256.txt
         env:

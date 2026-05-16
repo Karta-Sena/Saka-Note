@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Otso VERSION 1.1.0 LANGUAGES CXX)
+project(Otso VERSION 2.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,6 +63,21 @@ add_executable(Otso WIN32
 
 target_include_directories(Otso PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/modules)
 target_compile_definitions(Otso PRIVATE UNICODE _UNICODE NOMINMAX Otso_SPLIT_COMMAND_MODULES=1)
+if(MSVC)
+    target_compile_options(Otso PRIVATE
+        $<$<CONFIG:Release>:/Gy>
+        $<$<CONFIG:Release>:/Gw>
+    )
+    target_link_options(Otso PRIVATE
+        $<$<CONFIG:Release>:/OPT:REF>
+        $<$<CONFIG:Release>:/OPT:ICF>
+    )
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(Otso PRIVATE
+        $<$<CONFIG:Release>:-ffunction-sections>
+        $<$<CONFIG:Release>:-fdata-sections>
+    )
+endif()
 
 target_link_libraries(Otso PRIVATE
     comctl32
@@ -79,20 +94,15 @@ target_link_libraries(Otso PRIVATE
     winhttp
     d2d1
     dwrite
+    dxguid
 )
 
 set(Otso_FONT_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets/fonts")
 set(Otso_BUNDLED_FONT_FILES
-    "GeneralSans-Regular.otf"
-    "GeneralSans-Medium.otf"
-    "GeneralSans-Semibold.otf"
-    "GeneralSans-Bold.otf"
-    "GeneralSans-Italic.otf"
-    "GeneralSans-MediumItalic.otf"
-    "GeneralSans-SemiboldItalic.otf"
-    "GeneralSans-BoldItalic.otf"
-    "GeneralSans-Light.otf"
-    "GeneralSans-LightItalic.otf"
+    "ia_writer_quattro_s_regular.ttf"
+    "ia_writer_quattro_s_bold.ttf"
+    "ia_writer_quattro_s_italic.ttf"
+    "ia_writer_quattro_s_bold_italic.ttf"
 )
 set(Otso_BUNDLED_FONT_PATHS "")
 foreach(font_file IN LISTS Otso_BUNDLED_FONT_FILES)
@@ -117,7 +127,7 @@ endif()
 if(NOT MSVC)
     target_link_options(Otso PRIVATE -mwindows -municode)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        target_link_options(Otso PRIVATE -static)
+        target_link_options(Otso PRIVATE -static $<$<CONFIG:Release>:-Wl,--gc-sections>)
         target_link_libraries(Otso PRIVATE -static-libgcc -static-libstdc++)
     endif()
     if(CMAKE_STRIP)

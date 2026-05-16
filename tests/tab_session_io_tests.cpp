@@ -131,6 +131,93 @@ int RunTabSessionIoTests()
         DeleteFileW(path.c_str());
     }
 
+    {
+        const std::wstring path = TempPathForTest();
+        constexpr DWORD kMagic = 0x4C4E5331u;
+        constexpr DWORD kVersion = 1u;
+        constexpr DWORD kMaxDocs = 64u;
+        constexpr DWORD kMaxChars = 8u * 1024u * 1024u;
+        constexpr DWORD kMaxFileBytes = 64u * 1024u * 1024u;
+
+        std::vector<DocumentTabState> docs;
+        for (int i = 0; i < 70; ++i)
+        {
+            DocumentTabState doc;
+            wchar_t pathBuf[128] = {};
+            wsprintfW(pathBuf, L"C:\\temp\\early-%03d.txt", i);
+            doc.filePath = pathBuf;
+            doc.modified = true;
+            doc.text = L"tab content";
+            docs.push_back(std::move(doc));
+        }
+
+        const int activeOriginal = 3;
+        const bool writeOk = SessionWriteSnapshot(path, docs, activeOriginal, kMagic, kVersion, kMaxDocs, kMaxChars, kMaxFileBytes);
+        ok = ExpectTrue(L"Write truncated snapshot with early active tab", writeOk) && ok;
+
+        TabSessionSnapshot snapshot;
+        const bool readOk = SessionReadSnapshot(path, snapshot, kMagic, kVersion, kMaxDocs, kMaxChars, kMaxFileBytes, true);
+        ok = ExpectTrue(L"Read truncated snapshot with early active tab", readOk) && ok;
+        ok = ExpectTrue(L"Early active snapshot document count", snapshot.documents.size() == kMaxDocs) && ok;
+        ok = ExpectTrue(L"Early active snapshot index preserved", snapshot.activeDocument == activeOriginal) && ok;
+
+        if (snapshot.documents.size() == kMaxDocs)
+        {
+            ok = ExpectTrue(L"Early active snapshot keeps first document",
+                            snapshot.documents.front().filePath == docs.front().filePath) &&
+                 ok;
+            ok = ExpectTrue(L"Early active snapshot keeps unshifted tail",
+                            snapshot.documents.back().filePath == docs[kMaxDocs - 1u].filePath) &&
+                 ok;
+        }
+
+        DeleteFileW(path.c_str());
+    }
+
+    {
+        const std::wstring path = TempPathForTest();
+        constexpr DWORD kMagic = 0x4C4E5331u;
+        constexpr DWORD kVersion = 1u;
+        constexpr DWORD kMaxDocs = 64u;
+        constexpr DWORD kMaxChars = 8u * 1024u * 1024u;
+        constexpr DWORD kMaxFileBytes = 64u * 1024u * 1024u;
+
+        std::vector<DocumentTabState> docs;
+        for (int i = 0; i < 70; ++i)
+        {
+            DocumentTabState doc;
+            wchar_t pathBuf[128] = {};
+            wsprintfW(pathBuf, L"C:\\temp\\doc-%03d.txt", i);
+            doc.filePath = pathBuf;
+            doc.modified = true;
+            doc.text = L"tab content";
+            docs.push_back(std::move(doc));
+        }
+
+        const int activeOriginal = static_cast<int>(docs.size()) - 1;
+        const bool writeOk = SessionWriteSnapshot(path, docs, activeOriginal, kMagic, kVersion, kMaxDocs, kMaxChars, kMaxFileBytes);
+        ok = ExpectTrue(L"Write truncated snapshot file", writeOk) && ok;
+
+        TabSessionSnapshot snapshot;
+        const bool readOk = SessionReadSnapshot(path, snapshot, kMagic, kVersion, kMaxDocs, kMaxChars, kMaxFileBytes, true);
+        ok = ExpectTrue(L"Read truncated snapshot file", readOk) && ok;
+        ok = ExpectTrue(L"Truncated snapshot document count", snapshot.documents.size() == kMaxDocs) && ok;
+        ok = ExpectTrue(L"Truncated snapshot active index preserved", snapshot.activeDocument == static_cast<int>(kMaxDocs - 1u)) && ok;
+
+        if (snapshot.documents.size() == kMaxDocs)
+        {
+            const size_t expectedFirst = docs.size() - static_cast<size_t>(kMaxDocs);
+            ok = ExpectTrue(L"Truncated snapshot starts near active window",
+                            snapshot.documents.front().filePath == docs[expectedFirst].filePath) &&
+                 ok;
+            ok = ExpectTrue(L"Truncated snapshot includes original active doc",
+                            snapshot.documents.back().filePath == docs.back().filePath) &&
+                 ok;
+        }
+
+        DeleteFileW(path.c_str());
+    }
+
     if (!ok)
         return 1;
     std::wcout << L"[PASS] tab session io tests\n";
